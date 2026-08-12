@@ -780,18 +780,9 @@ let onlineRemoteMoving=false;
 let onlineAuthority=false;
 let onlineLastLiveSync=0;
 
-// v40: server-committed synchronization.
-// Live frames are visual only. Only a server COMMIT may change turn/rules.
-let onlineServerRevision=0;
-let onlineCurrentShotId=null;
-let onlineCurrentShotBaseRevision=0;
-let onlineFrameSeq=0;
-let onlineLastRemoteFrameSeq=-1;
-let onlineRemoteShotId=null;
-let onlineRemoteShotBaseRevision=0;
-let onlineAwaitingCommit=false;
-let onlineCommitWatchdog=null;
-let onlineLobbyStartPollTimer=null;
+// First-online architecture + focused turn-transition sync.
+let onlineTurnRevision=0;
+let onlineTurnWatchTimer=null;
 
 let tossWinner='p1';
 let matchStarted=false;
@@ -1269,7 +1260,7 @@ function currentSide(){
 function humanTurn(){
   const s=currentSide();
   if(gameMode==='online'){
-    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocket?.readyState===WebSocket.OPEN&&!onlineRemoteMoving&&!onlineAwaitingCommit;
+    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocket?.readyState===WebSocket.OPEN&&!onlineRemoteMoving;
   }
   return !!s && !isBotSide(s) && !preStartPause;
 }
@@ -1345,28 +1336,18 @@ function renderOnlineLobby(){
     const count=onlinePlayers.filter(p=>p.side).length;
     onlineStatusEl.textContent=count<2
       ?`Ты — ${sideText}. Отправь код второму игроку.`
-      :(onlineAwaitingCommit
-        ?'Оба готовы · сервер запускает матч…'
-        :`Ты — ${sideText}. Когда оба нажмут «Готов», матч начнётся автоматически.`);
+      :`Ты — ${sideText}. Когда оба нажмут «Готов», матч начнётся автоматически.`;
   }else if(hasRoom){
     onlineStatusEl.textContent='Подключение к комнате…';
   }
 
-  onlineReadyBtn.disabled=!onlineSide||onlinePlayers.filter(p=>p.side).length<2||!onlineSocketOpen()||onlineAwaitingCommit;
+  onlineReadyBtn.disabled=!onlineSide||onlinePlayers.filter(p=>p.side).length<2||!onlineSocketOpen();
   onlineReadyBtn.classList.toggle('ready',onlineReady);
   onlineReadyBtn.textContent=onlineReady?'✓ Готов':'Готов';
 }
 function onlineDisconnect(clearRoom=true){
-  onlineClearCommitWatchdog();
-  onlineClearLobbyStartPoll();
-  onlineServerRevision=0;
-  onlineCurrentShotId=null;
-  onlineCurrentShotBaseRevision=0;
-  onlineFrameSeq=0;
-  onlineLastRemoteFrameSeq=-1;
-  onlineRemoteShotId=null;
-  onlineRemoteShotBaseRevision=0;
-  onlineAwaitingCommit=false;
+  onlineClearTurnWatch();
+  onlineTurnRevision=0;
   const ws=onlineSocket;
   onlineSocket=null;
   if(ws){
@@ -1426,11 +1407,9 @@ function onlineConnectRoom(code){
   ws.onclose=()=>{
     if(ws!==onlineSocket)return;
     onlineSocket=null;
-    onlineClearLobbyStartPoll();
+    onlineClearTurnWatch();
     if(onlineMatchActive){
-      onlineClearCommitWatchdog();
       onlineRemoteMoving=false;
-      onlineAwaitingCommit=false;
       showToast('Связь с сервером потеряна');
       updateUI();
     }else{
@@ -1439,88 +1418,29 @@ function onlineConnectRoom(code){
     }
   };
 }
+function onlineClearTurnWatch(){
+  if(onlineTurnWatchTimer){
+    clearTimeout(onlineTurnWatchTimer);
+    onlineTurnWatchTimer=null;
+  }
+}
+function onlineArmTurnWatch(){
+  onlineClearTurnWatch();
+  if(gameMode!=='online'||!onlineMatchActive||!onlineRemoteMoving||!onlineSocketOpen())return;
+  onlineTurnWatchTimer=setTimeout(()=>{
+    onlineTurnWatchTimer=null;
+    if(gameMode!=='online'||!onlineMatchActive||!onlineRemoteMoving||!onlineSocketOpen())return;
+    onlineSend('state_request',{knownTurnRevision:onlineTurnRevision});
+    onlineArmTurnWatch();
+  },700);
+}
+
 function onlinePrepareStandardMatch(){
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
   kitConfig={red:defaultKitIds(),blue:defaultKitIds()};
   jackHardness={red:'soft',blue:'soft'};
   ballAllocation={red:defaultAllocationForSide('red'),blue:defaultAllocationForSide('blue')};
-}
-function onlineClearCommitWatchdog(){
-  if(onlineCommitWatchdog){
-    clearTimeout(onlineCommitWatchdog);
-    onlineCommitWatchdog=null;
-  }
-}
-function onlineClearLobbyStartPoll(){
-  if(onlineLobbyStartPollTimer){
-    clearTimeout(onlineLobbyStartPollTimer);
-    onlineLobbyStartPollTimer=null;
-  }
-}
-function onlineBothPlayersReady(){
-  const players=onlinePlayers.filter(p=>p.side);
-  return players.length>=2&&players.every(p=>p.ready);
-}
-function onlinePollServerForStart(){
-  onlineClearLobbyStartPoll();
-  if(gameMode!=='online'||onlineMatchActive||!onlineSocketOpen()||!onlineBothPlayersReady())return;
-
-  // BOTH clients independently verify the canonical server state.
-  onlineAwaitingCommit=true;
-  renderOnlineLobby();
-  onlineSend('state_request',{knownRevision:onlineServerRevision});
-
-  onlineLobbyStartPollTimer=setTimeout(()=>{
-    onlineLobbyStartPollTimer=null;
-    onlinePollServerForStart();
-  },500);
-}
-
-function onlineArmCommitWatchdog(){
-  onlineClearCommitWatchdog();
-  if(!onlineSocketOpen()||gameMode!=='online'||(!onlineMatchActive&&!onlineAwaitingCommit))return;
-
-  onlineCommitWatchdog=setTimeout(()=>{
-    onlineCommitWatchdog=null;
-    if(!onlineSocketOpen()||gameMode!=='online'||(!onlineMatchActive&&!onlineAwaitingCommit))return;
-    if(!(onlineRemoteMoving||onlineAwaitingCommit))return;
-
-    // Initial match start and every later shot are confirmed by the server.
-    onlineSend('state_request',{knownRevision:onlineServerRevision});
-    onlineArmCommitWatchdog();
-  },1800);
-}
-function onlineMakeShotId(){
-  const p=(onlinePlayerId||'p').replace(/[^a-zA-Z0-9]/g,'').slice(-8);
-  return `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`;
-}
-function onlineSerializeLastShot(){
-  if(!lastShot)return null;
-  let ref=null;
-  if(lastShot.ball===jack)ref='jack';
-  else{
-    const idx=balls.indexOf(lastShot.ball);
-    if(idx>=0)ref=`ball:${idx}`;
-  }
-  return{
-    kind:lastShot.kind||null,
-    side:lastShot.side||null,
-    fouled:!!lastShot.fouled,
-    ref,
-    entered:lastShot.ball?!!lastShot.ball.entered:null
-  };
-}
-function onlineRestoreLastShot(data){
-  if(!data)return null;
-  let ball=null;
-  if(data.ref==='jack')ball=jack;
-  else if(typeof data.ref==='string'&&data.ref.startsWith('ball:')){
-    const idx=Number(data.ref.slice(5));
-    if(Number.isInteger(idx)&&idx>=0&&idx<balls.length)ball=balls[idx];
-  }
-  if(!ball&&data.entered!==null)ball={entered:!!data.entered};
-  return{kind:data.kind,side:data.side,fouled:!!data.fouled,ball};
 }
 function onlineSerializeObject(b){
   if(!b)return null;
@@ -1547,22 +1467,9 @@ function onlineDeserializeObject(o){
     realism:o.realism?onlineClone(o.realism):null
   };
 }
-function onlineExportMotionFrame(){
-  return{
-    jack:onlineSerializeObject(jack),
-    balls:balls.map(onlineSerializeObject)
-  };
-}
-function onlineApplyMotionFrame(frame){
-  if(!frame)return;
-  // VISUAL ONLY: do not touch phase, score, inventory, boxes, Jack rules,
-  // or any other canonical match data here.
-  jack=onlineDeserializeObject(frame.jack);
-  balls=(frame.balls||[]).map(onlineDeserializeObject);
-}
 function onlineExportState(){
   return{
-    version:4,serverRevision:onlineServerRevision,
+    version:1,turnRevision:onlineTurnRevision,
     matchFormat,fieldOrientation,realisticMode,totalEnds,endNo,
     redScore,blueScore,redLeft,blueLeft,phase,currentJackBox,
     activePlayerBox:onlineClone(activePlayerBox),firstColourLockedBox:onlineClone(firstColourLockedBox),
@@ -1570,16 +1477,22 @@ function onlineExportState(){
     selectedBall:onlineClone(selectedBall),jackHardness:onlineClone(jackHardness),
     currentJackHardness,kitConfig:onlineClone(kitConfig),ballAllocation:onlineClone(ballAllocation),
     ballInventory:onlineClone(ballInventory),launcherPositions:onlineClone(launcherPositions),
-    jack:onlineSerializeObject(jack),balls:balls.map(onlineSerializeObject),
-    lastShot:onlineSerializeLastShot(),matchStarted,
+    jack:onlineSerializeObject(jack),balls:balls.map(onlineSerializeObject),matchStarted,
     modal:phase==='finished'?{title:modalTitle.textContent,text:modalText.textContent}:null
   };
 }
-function onlineApplyState(s,revision=null){
+function onlineApplyMotionState(s){
+  if(!s)return;
+  // Live snapshots only move objects. They cannot change whose turn it is.
+  jack=onlineDeserializeObject(s.jack);
+  balls=(s.balls||[]).map(onlineDeserializeObject);
+  updateUI();
+}
+function onlineApplyState(s){
   if(!s)return false;
-  const incoming=Number(revision??s.serverRevision??0)||0;
-  if(incoming<onlineServerRevision)return false;
-  if(incoming)onlineServerRevision=incoming;
+  const incomingRevision=Number(s.turnRevision)||0;
+  if(incomingRevision<onlineTurnRevision)return false;
+  onlineTurnRevision=Math.max(onlineTurnRevision,incomingRevision);
 
   const keepSide=onlineSide;
   balls=[];jack=null;
@@ -1607,322 +1520,136 @@ function onlineApplyState(s,revision=null){
   jack=onlineDeserializeObject(s.jack);
   balls=(s.balls||[]).map(onlineDeserializeObject);
   matchStarted=s.matchStarted!==false;
-  lastShot=onlineRestoreLastShot(s.lastShot);
-  settleFrames=0;
+  lastShot=null;settleFrames=0;
   gameMode='online';sideController={red:'p1',blue:'p2'};onlineSide=keepSide;
-
   if(s.modal){
     modalTitle.textContent=s.modal.title||'Матч окончен';
     modalText.textContent=s.modal.text||'';
     modal.classList.add('show');
   }else modal.classList.remove('show');
-
   updateUI();
   return true;
 }
-function onlineEnterStartedMatch(state,revision=0,isAuthority=false){
-  onlineClearLobbyStartPoll();
+function onlineEnterStartedMatch(state,fromHost=false){
   onlineMatchActive=true;
   onlineRemoteMoving=false;
-  onlineAwaitingCommit=false;
-  onlineCurrentShotId=null;
-  onlineRemoteShotId=null;
-  onlineClearCommitWatchdog();
   gameMode='online';
   setupOverlay.classList.remove('show');
   onlineBadge?.classList.add('show');
-  if(state)onlineApplyState(state,revision);
+  if(state)onlineApplyState(state);
   relayoutSoon();
   updateUI();
   showStartNotice(
     'Онлайн-матч',
-    `Ты играешь за ${onlineSide==='red'?'красных':'синих'}. Сервер подтверждает каждый завершённый ход.`
+    `Ты играешь за ${onlineSide==='red'?'красных':'синих'}. Ходы синхронизируются через комнату ${onlineRoomCode}.`
   );
-  onlineAuthority=!!isAuthority;
+  if(fromHost)onlineAuthority=true;
 }
 function onlineHostStartMatch(){
-  if(onlineGameStartSent||onlineMatchActive||onlineSide!=='red'||onlinePlayers.length<2)return;
+  if(onlineGameStartSent||onlineSide!=='red'||onlinePlayers.length<2)return;
   const readyPlayers=onlinePlayers.filter(p=>p.side&&p.ready);
   if(readyPlayers.length<2)return;
-
-  onlinePrepareStandardMatch();
-
-  // Build the initial position locally, but DO NOT enter the match yet.
-  // Both clients enter only after the Durable Object commits this state.
-  const keepMode=gameMode;
-  gameMode='local';
-  resetMatch();
-  gameMode=keepMode;
-  sideController={red:'p1',blue:'p2'};
-
-  const initialState=onlineExportState();
-
-  onlineMatchActive=false;
-  onlineAuthority=false;
-  onlineAwaitingCommit=true;
   onlineGameStartSent=true;
-  onlineStatusEl.textContent='Оба готовы · сервер запускает матч…';
-  renderOnlineLobby();
-
-  const sent=onlineSend('commit_state',{
-    baseRevision:onlineServerRevision,
-    reason:'game_start',
-    state:initialState
-  });
-
-  if(!sent){
-    onlineGameStartSent=false;
-    onlineAwaitingCommit=false;
-    onlineStatusEl.textContent='Не удалось отправить запуск. Попробуем снова…';
-    renderOnlineLobby();
-    return;
-  }
-
-  onlineArmCommitWatchdog();
-}
-function onlineHandleCommit(data){
-  const revision=Number(data.revision)||0;
-  if(revision<onlineServerRevision)return;
-
-  const isMine=data.playerId===onlinePlayerId;
-  const reason=data.reason||'state';
-
-  onlineClearCommitWatchdog();
-  onlineRemoteMoving=false;
-  onlineAwaitingCommit=false;
-  onlineLastRemoteFrameSeq=-1;
-  onlineRemoteShotId=null;
-  onlineRemoteShotBaseRevision=0;
-
-  if(data.shotId&&data.shotId===onlineCurrentShotId){
-    onlineCurrentShotId=null;
-    onlineCurrentShotBaseRevision=0;
-    onlineFrameSeq=0;
-  }
-
-  onlineAuthority=isMine;
-
-  if(reason==='game_start'){
-    onlineClearLobbyStartPoll();
-    onlineGameStartSent=true;
-    onlineEnterStartedMatch(data.state,revision,isMine);
-    return;
-  }
-
-  if(!onlineMatchActive){
-    onlineEnterStartedMatch(data.state,revision,isMine);
-    return;
-  }
-
-  onlineApplyState(data.state,revision);
-  updateUI();
+  onlineTurnRevision=1;
+  onlinePrepareStandardMatch();
+  setupOverlay.classList.remove('show');
+  resetMatch();
+  onlineMatchActive=true;
+  onlineAuthority=true;
+  const state=onlineExportState();
+  onlineSend('game_start',{state});
+  onlineSend('shot_result',{state});
+  onlineEnterStartedMatch(state,true);
 }
 function onlineHandleMessage(data){
   if(!data||typeof data!=='object')return;
-
   if(data.type==='room_full'){
     onlineStatusEl.textContent='Комната заполнена';
     showToast('В комнате уже два игрока');
     return;
   }
-
   if(data.type==='joined'){
     onlinePlayerId=data.playerId;
     onlineSide=data.side;
-    onlineServerRevision=Number(data.revision)||0;
-
     if(data.state&&data.state.phase){
-      onlineEnterStartedMatch(data.state,onlineServerRevision,false);
-    }else{
-      renderOnlineLobby();
+      onlineMatchActive=true;
+      onlineApplyState(data.state);
+      setupOverlay.classList.remove('show');
+      onlineBadge?.classList.add('show');
+      showStartNotice('Возвращение в матч',`Ты снова подключён за ${onlineSide==='red'?'красных':'синих'}.`);
     }
+    renderOnlineLobby();
     return;
   }
-
   if(data.type==='room_state'){
     onlinePlayers=Array.isArray(data.players)?data.players:[];
     const me=onlinePlayers.find(p=>p.id===onlinePlayerId);
     onlineReady=!!me?.ready;
-
-    if(!onlineMatchActive&&onlineBothPlayersReady()){
-      // Important: waiting for server start is symmetrical. Blue no longer
-      // relies on receiving one particular broadcast packet.
-      onlineAwaitingCommit=true;
-      renderOnlineLobby();
-      onlinePollServerForStart();
-
-      if(onlineSide==='red'){
-        setTimeout(onlineHostStartMatch,80);
-      }
-    }else{
-      if(!onlineMatchActive){
-        onlineAwaitingCommit=false;
-        onlineClearLobbyStartPoll();
-      }
-      renderOnlineLobby();
-    }
+    renderOnlineLobby();
+    if(onlineSide==='red')setTimeout(onlineHostStartMatch,120);
     return;
   }
-
-  if(data.type==='commit'){
-    onlineHandleCommit(data);
+  if(data.playerId&&data.playerId===onlinePlayerId)return;
+  if(data.type==='game_start'&&data.state){
+    onlineAuthority=false;
+    onlineEnterStartedMatch(data.state,false);
     return;
   }
-
-  if(data.type==='state_sync'){
-    const revision=Number(data.revision)||0;
-
-    // If this client is still in the lobby but the Durable Object already
-    // contains a real match, enter it immediately. This is independent of
-    // receiving the original game_start COMMIT broadcast.
-    if(!onlineMatchActive&&data.state&&data.state.phase){
-      onlineClearCommitWatchdog();
-      onlineClearLobbyStartPoll();
-      onlineGameStartSent=true;
-      onlineEnterStartedMatch(data.state,revision,false);
-      return;
-    }
-
-    // Red may query before its initial commit has reached the server.
-    if(!onlineMatchActive&&onlineBothPlayersReady()&&!data.state){
-      if(onlineSide==='red'&&!onlineGameStartSent){
-        setTimeout(onlineHostStartMatch,120);
-      }
-      return;
-    }
-
-    // While watching a remote shot, the old committed revision is expected.
-    // Do not roll the animation backwards to it.
-    if(onlineRemoteMoving&&revision<=onlineRemoteShotBaseRevision){
-      onlineArmCommitWatchdog();
-      return;
-    }
-
-    if(data.state&&revision>=onlineServerRevision){
-      onlineClearCommitWatchdog();
-      onlineRemoteMoving=false;
-      onlineAwaitingCommit=false;
-      onlineAuthority=false;
-      onlineRemoteShotId=null;
-      onlineApplyState(data.state,revision);
-    }
-    return;
-  }
-
-  if(data.type==='shot_begin'){
-    if(data.playerId===onlinePlayerId)return;
-    const base=Number(data.baseRevision)||0;
-
-    // A shot may only start from the exact state we have committed.
-    if(base!==onlineServerRevision){
-      onlineSend('state_request',{knownRevision:onlineServerRevision});
-      return;
-    }
-
+  if(data.type==='throw'&&data.state){
     onlineAuthority=false;
     onlineRemoteMoving=true;
-    onlineAwaitingCommit=false;
-    onlineRemoteShotId=data.shotId||null;
-    onlineRemoteShotBaseRevision=base;
-    onlineLastRemoteFrameSeq=-1;
-    onlineArmCommitWatchdog();
+    onlineApplyState(data.state);
+    onlineRemoteMoving=true;
+    onlineArmTurnWatch();
     updateUI();
     return;
   }
-
-  if(data.type==='frame'){
-    if(data.playerId===onlinePlayerId)return;
-    if(!onlineRemoteMoving||!onlineRemoteShotId)return;
-    if(data.shotId!==onlineRemoteShotId)return;
-    if(Number(data.baseRevision)!==onlineRemoteShotBaseRevision)return;
-
-    const seq=Number(data.seq)||0;
-    if(seq<=onlineLastRemoteFrameSeq)return;
-    onlineLastRemoteFrameSeq=seq;
-
-    onlineApplyMotionFrame(data.frame);
-    onlineArmCommitWatchdog();
-    updateUI();
-    return;
-  }
-
-  if(data.type==='shot_rejected'||data.type==='commit_rejected'){
-    const wasStarting=!onlineMatchActive&&onlineGameStartSent;
-
-    onlineClearCommitWatchdog();
-    onlineRemoteMoving=false;
-    onlineAwaitingCommit=false;
-    onlineCurrentShotId=null;
-    onlineRemoteShotId=null;
-    onlineAuthority=false;
-
-    if(data.state){
-      onlineApplyState(data.state,Number(data.revision)||0);
-    }else{
-      onlineServerRevision=Math.max(onlineServerRevision,Number(data.revision)||0);
-    }
-
-    if(wasStarting){
-      onlineGameStartSent=false;
-      onlineStatusEl.textContent='Перезапускаем матч через сервер…';
-      renderOnlineLobby();
-      if(onlineSide==='red')setTimeout(onlineHostStartMatch,350);
-    }else{
-      onlineSend('state_request',{knownRevision:onlineServerRevision});
-      showToast('Состояние обновлено с сервера');
+  if(data.type==='sync_state'&&data.state){
+    if(onlineRemoteMoving){
+      onlineApplyMotionState(data.state);
+      onlineArmTurnWatch();
     }
     return;
   }
-
-  if(data.type==='shot_cancelled'){
-    onlineClearCommitWatchdog();
-    onlineRemoteMoving=false;
-    onlineAwaitingCommit=false;
-    onlineRemoteShotId=null;
-    onlineAuthority=false;
-    if(data.state)onlineApplyState(data.state,Number(data.revision)||0);
-    showToast('Бросок отменён из-за разрыва соединения');
+  if(data.type==='state_reply'&&data.state){
+    const incomingRevision=Number(data.state.turnRevision)||0;
+    if(incomingRevision>onlineTurnRevision){
+      const applied=onlineApplyState(data.state);
+      if(applied){
+        onlineRemoteMoving=false;
+        onlineClearTurnWatch();
+        updateUI();
+      }
+    }
     return;
   }
-
+  if((data.type==='shot_result'||data.type==='decline')&&data.state){
+    const applied=onlineApplyState(data.state);
+    if(applied){
+      onlineRemoteMoving=false;
+      onlineClearTurnWatch();
+      updateUI();
+    }
+    return;
+  }
   if(data.type==='restart'){
     onlineDisconnect(true);
     showSetup();
     showToast('Соперник вышел из онлайн-матча');
   }
 }
-function onlineSendAuthoritativeState(reason='auto'){
+function onlineSendAuthoritativeState(type='shot_result'){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||!onlineSocketOpen())return;
-  if(onlineAwaitingCommit)return;
-
-  const shotId=onlineCurrentShotId;
-  const actualReason=reason==='auto'
-    ?(shotId?'shot_result':'state_update')
-    :reason;
-
-  onlineAwaitingCommit=true;
-  onlineSend('commit_state',{
-    baseRevision:onlineServerRevision,
-    shotId:shotId||null,
-    reason:actualReason,
-    state:onlineExportState()
-  });
-  onlineArmCommitWatchdog();
+  // Only final rule/turn states advance the revision.
+  onlineTurnRevision++;
+  onlineSend(type,{state:onlineExportState()});
 }
 function onlineMaybeLiveSync(){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||onlineRemoteMoving||phase!=='moving'||!onlineSocketOpen())return;
-  if(!onlineCurrentShotId)return;
-
   const now=performance.now();
-  if(now-onlineLastLiveSync<90)return;
+  if(now-onlineLastLiveSync<75)return;
   onlineLastLiveSync=now;
-
-  onlineSend('frame',{
-    shotId:onlineCurrentShotId,
-    baseRevision:onlineCurrentShotBaseRevision,
-    seq:++onlineFrameSeq,
-    frame:onlineExportMotionFrame()
-  });
+  onlineSend('sync_state',{state:onlineExportState()});
 }
 
 function clearSetupTimers(){
@@ -3095,11 +2822,7 @@ function updateUI(){
       ?`ЗАДАЧА · ${puzzle.difficulty}`
       :(tieBreak?'ТАЙ-БРЕЙК':`${formatConfig().label} · энд ${endNo} / ${totalEnds}`);
 
-  if(gameMode==='online'&&onlineRemoteMoving){
-    statusEl.textContent='Соперник бросает…';
-  }else if(gameMode==='online'&&onlineAwaitingCommit){
-    statusEl.textContent='Сервер подтверждает ход…';
-  }else if(phase==='trainingEdit'){
+  if(phase==='trainingEdit'){
     statusEl.textContent='Расставь ситуацию';
   }else if(phase==='jackRed'||phase==='jackBlue'){
     const s=currentSide();statusEl.textContent=`${sideOwnerName(s)} · бокс ${currentJackBox} · джек`;
@@ -3158,30 +2881,10 @@ function launchHuman(){
   lastShot={kind,side,ball:b,fouled:false};
   phase='moving';
   if(gameMode==='online'){
-    onlineClearCommitWatchdog();
     onlineAuthority=true;
     onlineRemoteMoving=false;
-    onlineAwaitingCommit=false;
-    onlineCurrentShotId=onlineMakeShotId();
-    onlineCurrentShotBaseRevision=onlineServerRevision;
-    onlineFrameSeq=0;
     onlineLastLiveSync=0;
-
-    onlineSend('shot_begin',{
-      shotId:onlineCurrentShotId,
-      baseRevision:onlineCurrentShotBaseRevision,
-      kind,
-      side
-    });
-
-    // Send the first visual frame immediately; the other client still keeps
-    // its canonical turn state untouched until COMMIT.
-    onlineSend('frame',{
-      shotId:onlineCurrentShotId,
-      baseRevision:onlineCurrentShotBaseRevision,
-      seq:++onlineFrameSeq,
-      frame:onlineExportMotionFrame()
-    });
+    onlineSend('throw',{state:onlineExportState(),kind,side});
   }
   tone(kind==='jack'?520:(side==='red'?260:190),.06,.03);updateUI();
 }
@@ -3203,10 +2906,7 @@ function declineRemaining(){
   }else{
     finishEnd();
   }
-  if(gameMode==='online'){
-    onlineAuthority=true;
-    onlineSendAuthoritativeState('decline');
-  }
+  if(gameMode==='online'){onlineAuthority=true;onlineSendAuthoritativeState('decline')}
 }
 
 function botTravelForSpeed(speed,decel){

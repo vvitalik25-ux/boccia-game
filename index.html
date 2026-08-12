@@ -781,6 +781,9 @@ let onlineAuthority=false;
 let onlineLastLiveSync=0;
 let onlineRemoteSettleTimer=null;
 let onlineRemoteMessageSerial=0;
+let onlineNetRevision=0;
+let onlineFinalRetryTimers=[];
+let onlinePostJackVerifyTimer=null;
 
 let tossWinner='p1';
 let matchStarted=false;
@@ -1345,7 +1348,10 @@ function renderOnlineLobby(){
 }
 function onlineDisconnect(clearRoom=true){
   onlineClearRemoteSettleTimer();
+  onlineClearFinalRetries();
+  onlineClearPostJackVerify();
   onlineRemoteMessageSerial++;
+  onlineNetRevision=0;
   const ws=onlineSocket;
   onlineSocket=null;
   if(ws){
@@ -1428,6 +1434,25 @@ function onlineClearRemoteSettleTimer(){
     onlineRemoteSettleTimer=null;
   }
 }
+function onlineClearFinalRetries(){
+  for(const id of onlineFinalRetryTimers)clearTimeout(id);
+  onlineFinalRetryTimers=[];
+}
+function onlineClearPostJackVerify(){
+  if(onlinePostJackVerifyTimer){
+    clearTimeout(onlinePostJackVerifyTimer);
+    onlinePostJackVerifyTimer=null;
+  }
+}
+function onlineVerifyAfterJack(expectedRevision){
+  onlineClearPostJackVerify();
+  onlinePostJackVerifyTimer=setTimeout(()=>{
+    onlinePostJackVerifyTimer=null;
+    if(gameMode!=='online'||!onlineMatchActive||!onlineSocketOpen())return;
+    if(expectedRevision!==onlineNetRevision)return;
+    onlineSend('state_request');
+  },360);
+}
 function onlineSerializeLastShot(){
   if(!lastShot)return null;
   let ref=null;
@@ -1473,29 +1498,46 @@ function onlineScheduleRemoteStoppedFallback(){
   onlineRemoteSettleTimer=setTimeout(()=>{
     onlineRemoteSettleTimer=null;
 
-    // A newer packet arrived meanwhile — let that packet decide.
     if(serial!==onlineRemoteMessageSerial)return;
     if(gameMode!=='online'||!onlineMatchActive||!onlineRemoteMoving||phase!=='moving')return;
     if(moving())return;
 
-    // The remote snapshot already says every object is stopped. If the
-    // authoritative shot_result packet was delayed/lost, complete the same
-    // stopped-shot transition locally instead of freezing on
-    // "Соперник бросает…".
-    if(lastShot?.ball&&!lastShot.ball.entered){
-      if(lastShot.kind==='jack'){
-        lastShot.fouled=true;
-        jack=null;
-      }else{
-        const idx=balls.indexOf(lastShot.ball);
-        if(idx>=0)balls.splice(idx,1);
-      }
+    // First recover from the authoritative Durable Object. The server stores
+    // shot_result before broadcasting it, so this fixes a missed final packet
+    // without independently calculating the next turn on the second device.
+    if(onlineSocketOpen()){
+      onlineSend('state_request');
+
+      onlineRemoteSettleTimer=setTimeout(()=>{
+        onlineRemoteSettleTimer=null;
+        if(serial!==onlineRemoteMessageSerial)return;
+        if(gameMode!=='online'||!onlineMatchActive||!onlineRemoteMoving||phase!=='moving')return;
+        if(moving())return;
+
+        // Last-resort local completion only if the server did not answer.
+        if(lastShot?.ball&&!lastShot.ball.entered){
+          if(lastShot.kind==='jack'){
+            lastShot.fouled=true;
+            jack=null;
+          }else{
+            const idx=balls.indexOf(lastShot.ball);
+            if(idx>=0)balls.splice(idx,1);
+          }
+        }
+
+        onlineAuthority=false;
+        onlineRemoteMoving=false;
+        resolveStoppedShot();
+        updateUI();
+      },900);
+      return;
     }
 
+    onlineAuthority=false;
     onlineRemoteMoving=false;
     resolveStoppedShot();
     updateUI();
-  },650);
+  },320);
 }
 
 function onlineSerializeObject(b){
@@ -1525,7 +1567,8 @@ function onlineDeserializeObject(o){
 }
 function onlineExportState(){
   return{
-    version:1,matchFormat,fieldOrientation,realisticMode,totalEnds,endNo,
+    version:2,netRevision:onlineNetRevision,
+    matchFormat,fieldOrientation,realisticMode,totalEnds,endNo,
     redScore,blueScore,redLeft,blueLeft,phase,currentJackBox,
     activePlayerBox:onlineClone(activePlayerBox),firstColourLockedBox:onlineClone(firstColourLockedBox),
     lastColourSide,jackNeedsCross,tieBreak,tieFirst,equidistantSequence,equidistantNextSide,
@@ -1538,7 +1581,14 @@ function onlineExportState(){
   };
 }
 function onlineApplyState(s){
-  if(!s)return;
+  if(!s)return false;
+
+  const incomingRevision=Number(s.netRevision)||0;
+  if(incomingRevision&&onlineNetRevision&&incomingRevision<onlineNetRevision){
+    return false;
+  }
+  if(incomingRevision)onlineNetRevision=Math.max(onlineNetRevision,incomingRevision);
+
   const keepSide=onlineSide;
   balls=[];jack=null;
   matchFormat=s.matchFormat||'individual';
@@ -1574,6 +1624,7 @@ function onlineApplyState(s){
     modal.classList.add('show');
   }else modal.classList.remove('show');
   updateUI();
+  return true;
 }
 function onlineEnterStartedMatch(state,fromHost=false){
   onlineMatchActive=true;
@@ -1595,6 +1646,7 @@ function onlineHostStartMatch(){
   const readyPlayers=onlinePlayers.filter(p=>p.side&&p.ready);
   if(readyPlayers.length<2)return;
   onlineGameStartSent=true;
+  onlineNetRevision=1;
   onlinePrepareStandardMatch();
   setupOverlay.classList.remove('show');
   resetMatch();
@@ -1617,6 +1669,7 @@ function onlineHandleMessage(data){
     onlineSide=data.side;
     if(data.state&&data.state.phase){
       onlineMatchActive=true;
+      onlineNetRevision=Number(data.state.netRevision)||onlineNetRevision;
       onlineApplyState(data.state);
       setupOverlay.classList.remove('show');
       onlineBadge?.classList.add('show');
@@ -1636,6 +1689,8 @@ function onlineHandleMessage(data){
   if(data.playerId&&data.playerId===onlinePlayerId)return;
   if(data.type==='game_start'&&data.state){
     onlineClearRemoteSettleTimer();
+    onlineClearFinalRetries();
+    onlineClearPostJackVerify();
     onlineRemoteMessageSerial++;
     onlineAuthority=false;
     onlineEnterStartedMatch(data.state,false);
@@ -1643,10 +1698,12 @@ function onlineHandleMessage(data){
   }
   if(data.type==='throw'&&data.state){
     onlineClearRemoteSettleTimer();
+    onlineClearPostJackVerify();
     onlineRemoteMessageSerial++;
     onlineAuthority=false;
     onlineRemoteMoving=true;
-    onlineApplyState(data.state);
+    const applied=onlineApplyState(data.state);
+    if(!applied)return;
     onlineRemoteMoving=true;
     updateUI();
     onlineScheduleRemoteStoppedFallback();
@@ -1655,7 +1712,8 @@ function onlineHandleMessage(data){
   if(data.type==='sync_state'&&data.state){
     onlineClearRemoteSettleTimer();
     onlineRemoteMessageSerial++;
-    onlineApplyState(data.state);
+    const applied=onlineApplyState(data.state);
+    if(!applied)return;
     onlineRemoteMoving=data.state.phase==='moving';
     updateUI();
     onlineScheduleRemoteStoppedFallback();
@@ -1664,9 +1722,18 @@ function onlineHandleMessage(data){
   if((data.type==='shot_result'||data.type==='decline')&&data.state){
     onlineClearRemoteSettleTimer();
     onlineRemoteMessageSerial++;
-    onlineApplyState(data.state);
+    const applied=onlineApplyState(data.state);
+    if(!applied)return;
+    onlineAuthority=false;
     onlineRemoteMoving=false;
     updateUI();
+
+    // The Jack changes the phase from jackRed/jackBlue to the first colour
+    // throw. Verify that transition once against the server before allowing
+    // the match to continue independently on both devices.
+    if(data.type==='shot_result'&&data.state.lastShot?.kind==='jack'){
+      onlineVerifyAfterJack(Number(data.state.netRevision)||onlineNetRevision);
+    }
     return;
   }
   if(data.type==='restart'){
@@ -1677,7 +1744,26 @@ function onlineHandleMessage(data){
 }
 function onlineSendAuthoritativeState(type='shot_result'){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||!onlineSocketOpen())return;
-  onlineSend(type,{state:onlineExportState()});
+
+  const state=onlineExportState();
+  const revision=onlineNetRevision;
+  onlineSend(type,{state});
+
+  // A stopped shot is the important synchronization boundary.
+  // Repeat exactly the same final snapshot a few times. A later throw
+  // increments netRevision, automatically cancelling these retries.
+  if(type==='shot_result'){
+    onlineClearFinalRetries();
+    for(const delay of [180,520,1050]){
+      const id=setTimeout(()=>{
+        onlineFinalRetryTimers=onlineFinalRetryTimers.filter(x=>x!==id);
+        if(gameMode!=='online'||!onlineMatchActive||!onlineSocketOpen())return;
+        if(onlineNetRevision!==revision)return;
+        onlineSend('shot_result',{state});
+      },delay);
+      onlineFinalRetryTimers.push(id);
+    }
+  }
 }
 function onlineMaybeLiveSync(){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||onlineRemoteMoving||phase!=='moving'||!onlineSocketOpen())return;
@@ -2917,7 +3003,10 @@ function launchHuman(){
   phase='moving';
   if(gameMode==='online'){
     onlineClearRemoteSettleTimer();
+    onlineClearFinalRetries();
+    onlineClearPostJackVerify();
     onlineRemoteMessageSerial++;
+    onlineNetRevision++;
     onlineAuthority=true;
     onlineRemoteMoving=false;
     onlineLastLiveSync=0;
@@ -2943,7 +3032,12 @@ function declineRemaining(){
   }else{
     finishEnd();
   }
-  if(gameMode==='online'){onlineAuthority=true;onlineSendAuthoritativeState('decline')}
+  if(gameMode==='online'){
+    onlineClearFinalRetries();
+    onlineNetRevision++;
+    onlineAuthority=true;
+    onlineSendAuthoritativeState('decline');
+  }
 }
 
 function botTravelForSpeed(speed,decel){

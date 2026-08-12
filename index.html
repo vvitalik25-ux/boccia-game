@@ -791,6 +791,7 @@ let onlineRemoteShotId=null;
 let onlineRemoteShotBaseRevision=0;
 let onlineAwaitingCommit=false;
 let onlineCommitWatchdog=null;
+let onlineLobbyStartPollTimer=null;
 
 let tossWinner='p1';
 let matchStarted=false;
@@ -1357,6 +1358,7 @@ function renderOnlineLobby(){
 }
 function onlineDisconnect(clearRoom=true){
   onlineClearCommitWatchdog();
+  onlineClearLobbyStartPoll();
   onlineServerRevision=0;
   onlineCurrentShotId=null;
   onlineCurrentShotBaseRevision=0;
@@ -1424,6 +1426,7 @@ function onlineConnectRoom(code){
   ws.onclose=()=>{
     if(ws!==onlineSocket)return;
     onlineSocket=null;
+    onlineClearLobbyStartPoll();
     if(onlineMatchActive){
       onlineClearCommitWatchdog();
       onlineRemoteMoving=false;
@@ -1449,6 +1452,31 @@ function onlineClearCommitWatchdog(){
     onlineCommitWatchdog=null;
   }
 }
+function onlineClearLobbyStartPoll(){
+  if(onlineLobbyStartPollTimer){
+    clearTimeout(onlineLobbyStartPollTimer);
+    onlineLobbyStartPollTimer=null;
+  }
+}
+function onlineBothPlayersReady(){
+  const players=onlinePlayers.filter(p=>p.side);
+  return players.length>=2&&players.every(p=>p.ready);
+}
+function onlinePollServerForStart(){
+  onlineClearLobbyStartPoll();
+  if(gameMode!=='online'||onlineMatchActive||!onlineSocketOpen()||!onlineBothPlayersReady())return;
+
+  // BOTH clients independently verify the canonical server state.
+  onlineAwaitingCommit=true;
+  renderOnlineLobby();
+  onlineSend('state_request',{knownRevision:onlineServerRevision});
+
+  onlineLobbyStartPollTimer=setTimeout(()=>{
+    onlineLobbyStartPollTimer=null;
+    onlinePollServerForStart();
+  },500);
+}
+
 function onlineArmCommitWatchdog(){
   onlineClearCommitWatchdog();
   if(!onlineSocketOpen()||gameMode!=='online'||(!onlineMatchActive&&!onlineAwaitingCommit))return;
@@ -1593,6 +1621,7 @@ function onlineApplyState(s,revision=null){
   return true;
 }
 function onlineEnterStartedMatch(state,revision=0,isAuthority=false){
+  onlineClearLobbyStartPoll();
   onlineMatchActive=true;
   onlineRemoteMoving=false;
   onlineAwaitingCommit=false;
@@ -1674,6 +1703,7 @@ function onlineHandleCommit(data){
   onlineAuthority=isMine;
 
   if(reason==='game_start'){
+    onlineClearLobbyStartPoll();
     onlineGameStartSent=true;
     onlineEnterStartedMatch(data.state,revision,isMine);
     return;
@@ -1702,13 +1732,10 @@ function onlineHandleMessage(data){
     onlineServerRevision=Number(data.revision)||0;
 
     if(data.state&&data.state.phase){
-      onlineMatchActive=true;
-      onlineApplyState(data.state,onlineServerRevision);
-      setupOverlay.classList.remove('show');
-      onlineBadge?.classList.add('show');
-      showStartNotice('Возвращение в матч',`Ты снова подключён за ${onlineSide==='red'?'красных':'синих'}.`);
+      onlineEnterStartedMatch(data.state,onlineServerRevision,false);
+    }else{
+      renderOnlineLobby();
     }
-    renderOnlineLobby();
     return;
   }
 
@@ -1716,8 +1743,24 @@ function onlineHandleMessage(data){
     onlinePlayers=Array.isArray(data.players)?data.players:[];
     const me=onlinePlayers.find(p=>p.id===onlinePlayerId);
     onlineReady=!!me?.ready;
-    renderOnlineLobby();
-    if(onlineSide==='red')setTimeout(onlineHostStartMatch,120);
+
+    if(!onlineMatchActive&&onlineBothPlayersReady()){
+      // Important: waiting for server start is symmetrical. Blue no longer
+      // relies on receiving one particular broadcast packet.
+      onlineAwaitingCommit=true;
+      renderOnlineLobby();
+      onlinePollServerForStart();
+
+      if(onlineSide==='red'){
+        setTimeout(onlineHostStartMatch,80);
+      }
+    }else{
+      if(!onlineMatchActive){
+        onlineAwaitingCommit=false;
+        onlineClearLobbyStartPoll();
+      }
+      renderOnlineLobby();
+    }
     return;
   }
 
@@ -1729,19 +1772,21 @@ function onlineHandleMessage(data){
   if(data.type==='state_sync'){
     const revision=Number(data.revision)||0;
 
-    // During the initial READY -> START handshake, a committed state means
-    // the server already started the match even if the commit broadcast
-    // itself was missed.
-    if(!onlineMatchActive&&onlineAwaitingCommit){
-      if(data.state&&data.state.phase){
-        onlineClearCommitWatchdog();
-        onlineGameStartSent=true;
-        onlineEnterStartedMatch(data.state,revision,false);
-      }else if(onlineSide==='red'){
-        onlineClearCommitWatchdog();
-        onlineAwaitingCommit=false;
-        onlineGameStartSent=false;
-        setTimeout(onlineHostStartMatch,250);
+    // If this client is still in the lobby but the Durable Object already
+    // contains a real match, enter it immediately. This is independent of
+    // receiving the original game_start COMMIT broadcast.
+    if(!onlineMatchActive&&data.state&&data.state.phase){
+      onlineClearCommitWatchdog();
+      onlineClearLobbyStartPoll();
+      onlineGameStartSent=true;
+      onlineEnterStartedMatch(data.state,revision,false);
+      return;
+    }
+
+    // Red may query before its initial commit has reached the server.
+    if(!onlineMatchActive&&onlineBothPlayersReady()&&!data.state){
+      if(onlineSide==='red'&&!onlineGameStartSent){
+        setTimeout(onlineHostStartMatch,120);
       }
       return;
     }

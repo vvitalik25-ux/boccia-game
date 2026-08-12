@@ -1,7 +1,6 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<!-- ONLINE_FIRST_TURNSYNC_CLEANUP_BUILD -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
@@ -785,6 +784,11 @@ let onlineLastLiveSync=0;
 let onlineTurnRevision=0;
 let onlineTurnWatchTimer=null;
 
+// Final turn changes are confirmed by the server before another throw.
+let onlineAwaitingTurnCommit=false;
+let onlinePendingTurnCommit=null;
+let onlineTurnCommitTimer=null;
+
 let tossWinner='p1';
 let matchStarted=false;
 let afterKitSelectionAction=null;
@@ -1261,7 +1265,7 @@ function currentSide(){
 function humanTurn(){
   const s=currentSide();
   if(gameMode==='online'){
-    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocket?.readyState===WebSocket.OPEN&&!onlineRemoteMoving;
+    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocket?.readyState===WebSocket.OPEN&&!onlineRemoteMoving&&!onlineAwaitingTurnCommit;
   }
   return !!s && !isBotSide(s) && !preStartPause;
 }
@@ -1348,6 +1352,9 @@ function renderOnlineLobby(){
 }
 function onlineDisconnect(clearRoom=true){
   onlineClearTurnWatch();
+  onlineClearTurnCommitTimer();
+  onlineAwaitingTurnCommit=false;
+  onlinePendingTurnCommit=null;
   onlineTurnRevision=0;
   const ws=onlineSocket;
   onlineSocket=null;
@@ -1434,6 +1441,45 @@ function onlineArmTurnWatch(){
     onlineSend('state_request',{knownTurnRevision:onlineTurnRevision});
     onlineArmTurnWatch();
   },700);
+}
+function onlineClearTurnCommitTimer(){
+  if(onlineTurnCommitTimer){
+    clearTimeout(onlineTurnCommitTimer);
+    onlineTurnCommitTimer=null;
+  }
+}
+function onlineMakeCommitId(){
+  const p=(onlinePlayerId||'p').replace(/[^a-zA-Z0-9]/g,'').slice(-8);
+  return `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
+}
+function onlineSendPendingTurnCommit(){
+  if(!onlinePendingTurnCommit||!onlineSocketOpen())return;
+  onlineSend('turn_commit',onlinePendingTurnCommit);
+
+  onlineClearTurnCommitTimer();
+  onlineTurnCommitTimer=setTimeout(()=>{
+    onlineTurnCommitTimer=null;
+    if(!onlinePendingTurnCommit||!onlineAwaitingTurnCommit)return;
+
+    // If the acknowledgement was lost, retry the SAME commit id.
+    // The server treats it idempotently and will not advance twice.
+    onlineSend('turn_commit',onlinePendingTurnCommit);
+    onlineSend('state_request',{knownTurnRevision:onlineTurnRevision});
+    onlineSendPendingTurnCommit();
+  },700);
+}
+function onlineFinishTurnCommit(state,revision){
+  onlineClearTurnCommitTimer();
+  onlinePendingTurnCommit=null;
+  onlineAwaitingTurnCommit=false;
+  onlineRemoteMoving=false;
+  onlineClearTurnWatch();
+
+  if(state)onlineApplyState(state);
+  if(Number(revision)>onlineTurnRevision)onlineTurnRevision=Number(revision);
+
+  onlineAuthority=false;
+  updateUI();
 }
 
 function onlinePrepareStandardMatch(){
@@ -1554,12 +1600,18 @@ function onlineHostStartMatch(){
   onlineTurnRevision=1;
   onlinePrepareStandardMatch();
   setupOverlay.classList.remove('show');
+
+  // Build the initial end without the online auto-sync callback.
+  const keepMode=gameMode;
+  gameMode='local';
   resetMatch();
+  gameMode=keepMode;
+  sideController={red:'p1',blue:'p2'};
+
   onlineMatchActive=true;
   onlineAuthority=true;
   const state=onlineExportState();
   onlineSend('game_start',{state});
-  onlineSend('shot_result',{state});
   onlineEnterStartedMatch(state,true);
 }
 function onlineHandleMessage(data){
@@ -1590,6 +1642,26 @@ function onlineHandleMessage(data){
     if(onlineSide==='red')setTimeout(onlineHostStartMatch,120);
     return;
   }
+  if(data.type==='turn_committed'&&data.state){
+    const incomingRevision=Number(data.revision||data.state.turnRevision)||0;
+    if(incomingRevision>=onlineTurnRevision){
+      onlineFinishTurnCommit(data.state,incomingRevision);
+    }
+    return;
+  }
+  if(data.type==='turn_rejected'){
+    const incomingRevision=Number(data.revision)||0;
+    if(data.state){
+      onlineFinishTurnCommit(data.state,incomingRevision);
+    }else{
+      onlineClearTurnCommitTimer();
+      onlineAwaitingTurnCommit=false;
+      onlinePendingTurnCommit=null;
+      onlineSend('state_request',{knownTurnRevision:onlineTurnRevision});
+    }
+    return;
+  }
+
   if(data.playerId&&data.playerId===onlinePlayerId)return;
   if(data.type==='game_start'&&data.state){
     onlineAuthority=false;
@@ -1614,13 +1686,12 @@ function onlineHandleMessage(data){
   }
   if(data.type==='state_reply'&&data.state){
     const incomingRevision=Number(data.state.turnRevision)||0;
+
     if(incomingRevision>onlineTurnRevision){
-      const applied=onlineApplyState(data.state);
-      if(applied){
-        onlineRemoteMoving=false;
-        onlineClearTurnWatch();
-        updateUI();
-      }
+      onlineFinishTurnCommit(data.state,incomingRevision);
+    }else if(onlineAwaitingTurnCommit&&onlinePendingTurnCommit){
+      // Server still has the old revision, so our commit was not accepted yet.
+      onlineSendPendingTurnCommit();
     }
     return;
   }
@@ -1641,9 +1712,20 @@ function onlineHandleMessage(data){
 }
 function onlineSendAuthoritativeState(type='shot_result'){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||!onlineSocketOpen())return;
-  // Only final rule/turn states advance the revision.
-  onlineTurnRevision++;
-  onlineSend(type,{state:onlineExportState()});
+  if(onlineAwaitingTurnCommit)return;
+
+  const state=onlineExportState();
+  const commit={
+    commitId:onlineMakeCommitId(),
+    baseRevision:onlineTurnRevision,
+    reason:type,
+    state
+  };
+
+  onlineAwaitingTurnCommit=true;
+  onlinePendingTurnCommit=commit;
+  updateUI();
+  onlineSendPendingTurnCommit();
 }
 function onlineMaybeLiveSync(){
   if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||onlineRemoteMoving||phase!=='moving'||!onlineSocketOpen())return;
@@ -2882,6 +2964,9 @@ function launchHuman(){
   lastShot={kind,side,ball:b,fouled:false};
   phase='moving';
   if(gameMode==='online'){
+    onlineClearTurnCommitTimer();
+    onlineAwaitingTurnCommit=false;
+    onlinePendingTurnCommit=null;
     onlineAuthority=true;
     onlineRemoteMoving=false;
     onlineLastLiveSync=0;

@@ -1344,12 +1344,14 @@ function renderOnlineLobby(){
     const count=onlinePlayers.filter(p=>p.side).length;
     onlineStatusEl.textContent=count<2
       ?`Ты — ${sideText}. Отправь код второму игроку.`
-      :`Ты — ${sideText}. Когда оба нажмут «Готов», матч начнётся автоматически.`;
+      :(onlineAwaitingCommit
+        ?'Оба готовы · сервер запускает матч…'
+        :`Ты — ${sideText}. Когда оба нажмут «Готов», матч начнётся автоматически.`);
   }else if(hasRoom){
     onlineStatusEl.textContent='Подключение к комнате…';
   }
 
-  onlineReadyBtn.disabled=!onlineSide||onlinePlayers.filter(p=>p.side).length<2||!onlineSocketOpen();
+  onlineReadyBtn.disabled=!onlineSide||onlinePlayers.filter(p=>p.side).length<2||!onlineSocketOpen()||onlineAwaitingCommit;
   onlineReadyBtn.classList.toggle('ready',onlineReady);
   onlineReadyBtn.textContent=onlineReady?'✓ Готов':'Готов';
 }
@@ -1449,15 +1451,14 @@ function onlineClearCommitWatchdog(){
 }
 function onlineArmCommitWatchdog(){
   onlineClearCommitWatchdog();
-  if(!onlineSocketOpen()||gameMode!=='online'||!onlineMatchActive)return;
+  if(!onlineSocketOpen()||gameMode!=='online'||(!onlineMatchActive&&!onlineAwaitingCommit))return;
 
   onlineCommitWatchdog=setTimeout(()=>{
     onlineCommitWatchdog=null;
-    if(!onlineSocketOpen()||gameMode!=='online'||!onlineMatchActive)return;
+    if(!onlineSocketOpen()||gameMode!=='online'||(!onlineMatchActive&&!onlineAwaitingCommit))return;
     if(!(onlineRemoteMoving||onlineAwaitingCommit))return;
 
-    // Never finish the other player's shot locally. Ask the Durable Object
-    // for the last committed version instead.
+    // Initial match start and every later shot are confirmed by the server.
     onlineSend('state_request',{knownRevision:onlineServerRevision});
     onlineArmCommitWatchdog();
   },1800);
@@ -1611,30 +1612,43 @@ function onlineEnterStartedMatch(state,revision=0,isAuthority=false){
   onlineAuthority=!!isAuthority;
 }
 function onlineHostStartMatch(){
-  if(onlineGameStartSent||onlineSide!=='red'||onlinePlayers.length<2)return;
+  if(onlineGameStartSent||onlineMatchActive||onlineSide!=='red'||onlinePlayers.length<2)return;
   const readyPlayers=onlinePlayers.filter(p=>p.side&&p.ready);
   if(readyPlayers.length<2)return;
 
-  onlineGameStartSent=true;
   onlinePrepareStandardMatch();
 
-  // Build the initial game state without triggering any old automatic
-  // online state send from startRegulationEnd().
+  // Build the initial position locally, but DO NOT enter the match yet.
+  // Both clients enter only after the Durable Object commits this state.
   const keepMode=gameMode;
   gameMode='local';
   resetMatch();
   gameMode=keepMode;
   sideController={red:'p1',blue:'p2'};
 
-  onlineMatchActive=true;
-  onlineAuthority=true;
-  onlineAwaitingCommit=true;
+  const initialState=onlineExportState();
 
-  onlineSend('commit_state',{
+  onlineMatchActive=false;
+  onlineAuthority=false;
+  onlineAwaitingCommit=true;
+  onlineGameStartSent=true;
+  onlineStatusEl.textContent='Оба готовы · сервер запускает матч…';
+  renderOnlineLobby();
+
+  const sent=onlineSend('commit_state',{
     baseRevision:onlineServerRevision,
     reason:'game_start',
-    state:onlineExportState()
+    state:initialState
   });
+
+  if(!sent){
+    onlineGameStartSent=false;
+    onlineAwaitingCommit=false;
+    onlineStatusEl.textContent='Не удалось отправить запуск. Попробуем снова…';
+    renderOnlineLobby();
+    return;
+  }
+
   onlineArmCommitWatchdog();
 }
 function onlineHandleCommit(data){
@@ -1659,7 +1673,8 @@ function onlineHandleCommit(data){
 
   onlineAuthority=isMine;
 
-  if(reason==='game_start'&&!onlineMatchActive){
+  if(reason==='game_start'){
+    onlineGameStartSent=true;
     onlineEnterStartedMatch(data.state,revision,isMine);
     return;
   }
@@ -1713,6 +1728,23 @@ function onlineHandleMessage(data){
 
   if(data.type==='state_sync'){
     const revision=Number(data.revision)||0;
+
+    // During the initial READY -> START handshake, a committed state means
+    // the server already started the match even if the commit broadcast
+    // itself was missed.
+    if(!onlineMatchActive&&onlineAwaitingCommit){
+      if(data.state&&data.state.phase){
+        onlineClearCommitWatchdog();
+        onlineGameStartSent=true;
+        onlineEnterStartedMatch(data.state,revision,false);
+      }else if(onlineSide==='red'){
+        onlineClearCommitWatchdog();
+        onlineAwaitingCommit=false;
+        onlineGameStartSent=false;
+        setTimeout(onlineHostStartMatch,250);
+      }
+      return;
+    }
 
     // While watching a remote shot, the old committed revision is expected.
     // Do not roll the animation backwards to it.
@@ -1770,6 +1802,8 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='shot_rejected'||data.type==='commit_rejected'){
+    const wasStarting=!onlineMatchActive&&onlineGameStartSent;
+
     onlineClearCommitWatchdog();
     onlineRemoteMoving=false;
     onlineAwaitingCommit=false;
@@ -1780,9 +1814,18 @@ function onlineHandleMessage(data){
     if(data.state){
       onlineApplyState(data.state,Number(data.revision)||0);
     }else{
-      onlineSend('state_request',{knownRevision:onlineServerRevision});
+      onlineServerRevision=Math.max(onlineServerRevision,Number(data.revision)||0);
     }
-    showToast('Состояние обновлено с сервера');
+
+    if(wasStarting){
+      onlineGameStartSent=false;
+      onlineStatusEl.textContent='Перезапускаем матч через сервер…';
+      renderOnlineLobby();
+      if(onlineSide==='red')setTimeout(onlineHostStartMatch,350);
+    }else{
+      onlineSend('state_request',{knownRevision:onlineServerRevision});
+      showToast('Состояние обновлено с сервера');
+    }
     return;
   }
 

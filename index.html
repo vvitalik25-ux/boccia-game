@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<!-- ONLINE_EXACT_1V1_V3_CLEAN_WITH_ANIMATION -->
+<!-- ONLINE_EXACT_1V1_V4_PROTOCOL_GUARD -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
@@ -770,6 +770,7 @@ let gameMode='bot';
 let sideController={red:'p1',blue:'bot'};
 const ONLINE_SERVER='wss://boccia-online.v-vitalik25.workers.dev';
 const ONLINE_HTTP='https://boccia-online.v-vitalik25.workers.dev';
+const ONLINE_PROTOCOL='exact-1v1-v4';
 let onlineSocket=null;
 let onlineRoomCode='';
 let onlinePlayerId=null;
@@ -1570,7 +1571,12 @@ function onlinePlayAnimation(animation,finalState,revision,events=[],transition=
   const objects=Array.isArray(animation?.objects)?animation.objects:[];
 
   if(!frames.length||!objects.length){
-    onlineApplyPostAnimation(finalState,revision,events,transition);
+    // Never silently teleport on an incompatible animation payload.
+    onlineAnimating=false;
+    showToast('Ошибка формата анимации');
+    if(onlineStatusEl){
+      onlineStatusEl.textContent='Worker отдаёт несовместимую анимацию';
+    }
     return;
   }
 
@@ -1777,8 +1783,31 @@ function onlineHandleRoomState(data){
   onlineAckAction(data.ackActionId);
   renderOnlineLobby();
 }
+function onlineProtocolOk(data){
+  if(!data?.protocol)return false;
+  return data.protocol===ONLINE_PROTOCOL;
+}
+function onlineProtocolMismatch(){
+  onlineClearActionRetry();
+  onlineClearSync();
+  onlinePendingAction=null;
+  onlineMatchActive=false;
+  showToast('Worker не совпадает с игрой');
+  if(onlineStatusEl){
+    onlineStatusEl.textContent='Обнови worker.js · версия сервера не совпадает';
+  }
+  renderOnlineLobby();
+}
 function onlineHandleMessage(data){
   if(!data||typeof data!=='object')return;
+
+  if(
+    ['joined','room_state','snapshot','action_error','restart'].includes(data.type) &&
+    !onlineProtocolOk(data)
+  ){
+    onlineProtocolMismatch();
+    return;
+  }
 
   if(data.type==='joined'){
     onlinePlayerId=data.playerId;

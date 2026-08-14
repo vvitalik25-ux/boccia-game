@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<!-- SERVER_GAME_V1 -->
+<!-- SERVER_GAME_ANIMATED_V2 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
@@ -789,6 +789,14 @@ let onlineSyncTimer=null;
 let onlineReconnectTimer=null;
 let onlineManualDisconnect=false;
 let onlineCreatingRoom=false;
+
+// Server-driven playback only. This never changes game rules.
+let onlineAnimating=false;
+let onlineAnimationTimer=null;
+let onlineAnimationRevision=0;
+let onlineDeferredSnapshot=null;
+let onlineEventTimers=[];
+
 let onlineClientKey=(()=>{
   try{
     let k=localStorage.getItem('bocciaOnlineClientKey');
@@ -1171,6 +1179,20 @@ function showStartNotice(title,text){
   startNoticeHintEl.textContent='Нажми, чтобы начать';
   startNoticeEl.classList.add('show');
 }
+function showTimedNotice(title,text,duration=1750){
+  clearTimeout(showTimedNotice.t);
+  preStartPause=true;
+  startNoticeTitleEl.textContent=title;
+  startNoticeTextEl.textContent=text;
+  startNoticeHintEl.textContent='Нажми, чтобы продолжить';
+  startNoticeEl.classList.add('show');
+
+  showTimedNotice.t=setTimeout(()=>{
+    showTimedNotice.t=null;
+    if(startNoticeEl.classList.contains('show'))finishPreStartPause();
+  },duration);
+}
+
 function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0))}
 function allObjects(){return jack?[jack,...balls]:[...balls]}
 function moving(){return allObjects().some(b=>Math.hypot(b.vx,b.vy)>.06||Math.abs(b.vz||0)>.05)}
@@ -1280,7 +1302,7 @@ function currentSide(){
 function humanTurn(){
   const s=currentSide();
   if(gameMode==='online'){
-    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlinePendingAction;
+    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlinePendingAction&&!onlineAnimating;
   }
   return !!s && !isBotSide(s) && !preStartPause;
 }
@@ -1397,6 +1419,125 @@ function onlineScheduleSync(delay=1000){
     onlineScheduleSync(1000);
   },delay);
 }
+function onlineClearAnimation(){
+  if(onlineAnimationTimer){
+    clearTimeout(onlineAnimationTimer);
+    onlineAnimationTimer=null;
+  }
+  onlineAnimating=false;
+  onlineAnimationRevision=0;
+}
+function onlineClearEventTimers(){
+  for(const id of onlineEventTimers)clearTimeout(id);
+  onlineEventTimers=[];
+}
+function onlineAnimationObject(o){
+  return onlineDeserializeObject(o);
+}
+function onlineApplyAnimationFrame(frame){
+  if(!frame)return;
+  jack=frame.jack?onlineAnimationObject(frame.jack):null;
+  balls=Array.isArray(frame.balls)?frame.balls.map(onlineAnimationObject):[];
+}
+function onlineEventText(ev){
+  if(!ev)return '';
+  if(ev.text)return ev.text;
+
+  if(ev.type==='ball_out'){
+    const who=ev.side==='red'?'Красный':'Синий';
+    return `${who} мяч — аут`;
+  }
+  if(ev.type==='ball_not_entered'){
+    const who=ev.side==='red'?'Красный':'Синий';
+    return `${who} мяч не вошёл в игровую зону`;
+  }
+  if(ev.type==='jack_out')return 'Джек — аут';
+  if(ev.type==='jack_not_entered')return 'Джек не вошёл в игровую зону';
+  if(ev.type==='jack_cross')return 'Джек выбит — установлен на крест';
+  if(ev.type==='invalid_jack')return `Недействительный джек · следующий бокс ${ev.nextBox||''}`;
+  return '';
+}
+function onlineShowEvents(events=[]){
+  onlineClearEventTimers();
+  if(!Array.isArray(events)||!events.length)return;
+
+  const endEvent=events.find(ev=>ev.type==='end');
+  const tiebreakEvent=events.find(ev=>ev.type==='tiebreak');
+  const other=events
+    .filter(ev=>ev.type!=='end'&&ev.type!=='tiebreak')
+    .map(onlineEventText)
+    .filter(Boolean);
+
+  other.forEach((msg,i)=>{
+    const id=setTimeout(()=>showToast(msg),i*1050);
+    onlineEventTimers.push(id);
+  });
+
+  const noticeDelay=other.length?Math.min(1400,other.length*600):100;
+  if(endEvent){
+    const redPts=Number(endEvent.redPoints)||0;
+    const bluePts=Number(endEvent.bluePoints)||0;
+    const endScore=redPts&&bluePts
+      ?`${redPts}:${bluePts}`
+      :redPts?`красные +${redPts}`
+      :bluePts?`синие +${bluePts}`
+      :'без очков';
+
+    const next=endEvent.matchFinished
+      ?`Счёт ${endEvent.redScore}:${endEvent.blueScore}`
+      :`Счёт ${endEvent.redScore}:${endEvent.blueScore} · дальше энд ${endEvent.nextEnd}`;
+
+    const id=setTimeout(()=>{
+      showTimedNotice(`Энд ${endEvent.endedEnd} завершён`,`${endScore} · ${next}`,1900);
+    },noticeDelay);
+    onlineEventTimers.push(id);
+  }else if(tiebreakEvent){
+    const id=setTimeout(()=>{
+      showTimedNotice('Тай-брейк',tiebreakEvent.text||'Начинается дополнительный энд',1800);
+    },noticeDelay);
+    onlineEventTimers.push(id);
+  }
+}
+function onlineFinishAnimation(finalState,revision,events=[]){
+  onlineClearAnimation();
+  onlineApplyState(finalState,revision);
+  onlineShowEvents(events);
+  onlineScheduleSync(350);
+
+  const deferred=onlineDeferredSnapshot;
+  onlineDeferredSnapshot=null;
+  if(deferred&&Number(deferred.revision)>Number(revision)){
+    onlineApplyState(deferred.state,deferred.revision);
+  }
+}
+function onlinePlayAnimation(animation,finalState,revision,events=[]){
+  const frames=Array.isArray(animation?.frames)?animation.frames:[];
+  if(!frames.length){
+    onlineFinishAnimation(finalState,revision,events);
+    return;
+  }
+
+  onlineClearAnimation();
+  onlineClearSync();
+  onlineAnimating=true;
+  onlineAnimationRevision=Number(revision)||0;
+  onlineApplyAnimationFrame(frames[0]);
+  updateUI();
+
+  let i=1;
+  const frameMs=Math.max(18,Math.min(42,Number(animation.frameMs)||27));
+
+  const step=()=>{
+    if(!onlineAnimating)return;
+    if(i>=frames.length){
+      onlineFinishAnimation(finalState,revision,events);
+      return;
+    }
+    onlineApplyAnimationFrame(frames[i++]);
+    onlineAnimationTimer=setTimeout(step,frameMs);
+  };
+  onlineAnimationTimer=setTimeout(step,frameMs);
+}
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
   const hasRoom=!!onlineRoomCode;
@@ -1420,7 +1561,7 @@ function renderOnlineLobby(){
   if(onlineCreatingRoom){
     onlineStatusEl.textContent='Сервер создаёт комнату…';
   }else if(onlineMatchActive){
-    onlineStatusEl.textContent=`Матч работает на сервере · версия ${onlineRevision}`;
+    onlineStatusEl.textContent=onlineAnimating?'Серверный бросок · воспроизведение…':`Матч работает на сервере · версия ${onlineRevision}`;
   }else if(onlineSide){
     const connected=onlinePlayers.filter(p=>p.connected).length;
     if(connected<2)onlineStatusEl.textContent=`Ты — ${onlineSide==='red'?'красные':'синие'}. Ждём второго игрока.`;
@@ -1523,7 +1664,17 @@ function onlineEnterMatch(state,revision){
   onlineApplyState(state,revision);
   relayoutSoon();
   updateUI();
-  showToast(`Онлайн · ты за ${onlineSide==='red'?'красных':'синих'}`);
+
+  const starter=currentSide();
+  const starterText=starter
+    ?`${starter==='red'?'Красные':'Синие'} начинают · бокс ${currentJackBox} · джек`
+    :'Матч готов';
+
+  showTimedNotice(
+    'Матч начинается',
+    `Ты играешь за ${onlineSide==='red'?'красных':'синих'}. ${starterText}.`,
+    1900
+  );
 }
 function onlineHandleRoomState(data){
   onlinePlayers=Array.isArray(data.players)?data.players:[];
@@ -1571,9 +1722,24 @@ function onlineHandleMessage(data){
   if(data.type==='snapshot'){
     if(Array.isArray(data.players))onlinePlayers=data.players;
     onlineAckAction(data.ackActionId);
+
     if(data.state){
-      if(!onlineMatchActive)onlineEnterMatch(data.state,data.revision||0);
-      else onlineApplyState(data.state,data.revision||0);
+      const rev=Number(data.revision)||0;
+
+      if(!onlineMatchActive){
+        onlineEnterMatch(data.state,rev);
+      }else if(data.animation?.frames?.length){
+        onlinePlayAnimation(data.animation,data.state,rev,data.events||[]);
+      }else if(onlineAnimating){
+        // A recovery poll can return the already-committed final state while
+        // the local playback is still running. Do not jump to the end.
+        if(rev>onlineAnimationRevision){
+          onlineDeferredSnapshot={state:data.state,revision:rev};
+        }
+      }else{
+        onlineApplyState(data.state,rev);
+        if(data.events?.length)onlineShowEvents(data.events);
+      }
     }
     renderOnlineLobby();
     return;
@@ -1679,6 +1845,8 @@ function onlineConnectRoom(code,reconnecting=false){
     onlineSocket=null;
     onlineClearActionRetry();
     onlineClearSync();
+    onlineClearAnimation();
+    onlineDeferredSnapshot=null;
     if(!onlineManualDisconnect&&onlineRoomCode){
       if(onlineMatchActive)showToast('Связь потеряна · переподключаемся');
       else onlineStatusEl.textContent='Связь потеряна · переподключаемся…';
@@ -1742,6 +1910,9 @@ function onlineDisconnect(clearRoom=true){
   onlineClearActionRetry();
   onlineClearSync();
   onlineClearReconnect();
+  onlineClearAnimation();
+  onlineClearEventTimers();
+  onlineDeferredSnapshot=null;
 
   const ws=onlineSocket;
   onlineSocket=null;
@@ -2957,7 +3128,9 @@ function updateUI(){
       ?`ЗАДАЧА · ${puzzle.difficulty}`
       :(tieBreak?'ТАЙ-БРЕЙК':`${formatConfig().label} · энд ${endNo} / ${totalEnds}`);
 
-  if(gameMode==='online'&&onlinePendingAction){
+  if(gameMode==='online'&&onlineAnimating){
+    statusEl.textContent='Бросок…';
+  }else if(gameMode==='online'&&onlinePendingAction){
     statusEl.textContent=onlinePendingAction.type==='throw'?'Сервер рассчитывает бросок…':'Сервер подтверждает действие…';
   }else if(phase==='trainingEdit'){
     statusEl.textContent='Расставь ситуацию';

@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
+<!-- SERVER_GAME_V1 -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
@@ -537,7 +538,7 @@ button:active{transform:scale(.97)}button:disabled{opacity:.28}
         </div>
         <p class="onlineStatus" id="onlineStatus">Подключение…</p>
         <button class="onlineReady" id="onlineReadyBtn" disabled>Готов</button>
-        <p class="onlineNote">Формат, ориентацию поля и реализм задаёт красный игрок. В первой онлайн-версии используются стандартные комплекты мячей и Soft-джек.</p>
+        <p class="onlineNote">Комнату и сам матч ведёт сервер. Формат, ориентация и реализм фиксируются при создании комнаты. В онлайне используются стандартные комплекты и Soft-джек.</p>
       </div>
     </div>
 
@@ -768,34 +769,32 @@ let botTargetHistory={red:[],blue:[]};
 let gameMode='bot';
 let sideController={red:'p1',blue:'bot'};
 const ONLINE_SERVER='wss://boccia-online.v-vitalik25.workers.dev';
+const ONLINE_HTTP='https://boccia-online.v-vitalik25.workers.dev';
 let onlineSocket=null;
 let onlineRoomCode='';
 let onlinePlayerId=null;
 let onlineSide=null;
 let onlinePlayers=[];
-let onlineReady=false;          // server-confirmed READY
-let onlineReadyWanted=false;    // what this client wants
+let onlineReady=false;
 let onlineGameStartSent=false;
 let onlineMatchActive=false;
-let onlineRemoteMoving=false;   // kept for UI compatibility; no remote animation
-let onlineAuthority=false;      // this client currently owns an unsaved action
+let onlineRemoteMoving=false;
+let onlineAuthority=false;
 
-// SERVER-TRUTH protocol.
-// The Durable Object owns the canonical state and monotonically increasing revision.
+// SERVER GAME: browser = controller + renderer only.
 let onlineRevision=0;
-let onlinePendingSave=null;
-let onlineSaveRetryTimer=null;
+let onlinePendingAction=null;
+let onlineActionRetryTimer=null;
 let onlineSyncTimer=null;
-let onlineStartPending=null;
-let onlineStartRetryTimer=null;
 let onlineReconnectTimer=null;
 let onlineManualDisconnect=false;
+let onlineCreatingRoom=false;
 let onlineClientKey=(()=>{
   try{
-    let k=sessionStorage.getItem('bocciaOnlineClientKey');
+    let k=localStorage.getItem('bocciaOnlineClientKey');
     if(!k){
-      k=(crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`);
-      sessionStorage.setItem('bocciaOnlineClientKey',k);
+      k=crypto.randomUUID?.()||`${Date.now()}-${Math.random()}`;
+      localStorage.setItem('bocciaOnlineClientKey',k);
     }
     return k;
   }catch{
@@ -1059,10 +1058,12 @@ function moveLauncherToPoint(p){
 
   const c=court(),bw=c.w/6,top=throwingY(),bottom=my(12.5);
   const left=c.x+bw*(box-1);
-  launcherPositions[box]={
-    u:Math.max(0,Math.min(1,(p.x-left)/bw)),
-    v:Math.max(0,Math.min(1,(p.y-top)/(bottom-top)))
-  };
+  const u=Math.max(0,Math.min(1,(p.x-left)/bw));
+  const v=Math.max(0,Math.min(1,(p.y-top)/(bottom-top)));
+  if(gameMode==='online'){
+    return onlineQueueAction('set_launcher',{box,u,v});
+  }
+  launcherPositions[box]={u,v};
   showToast(`Позиция бокса ${box} обновлена`);
   return true;
 }
@@ -1279,7 +1280,7 @@ function currentSide(){
 function humanTurn(){
   const s=currentSide();
   if(gameMode==='online'){
-    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlinePendingSave;
+    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlinePendingAction;
   }
   return !!s && !isBotSide(s) && !preStartPause;
 }
@@ -1316,12 +1317,6 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
 function onlineClone(value){
   return value==null?value:JSON.parse(JSON.stringify(value));
 }
-function onlineGenerateRoomCode(){
-  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let out='';
-  for(let i=0;i<5;i++)out+=chars[Math.floor(Math.random()*chars.length)];
-  return out;
-}
 function onlineNormalizeRoomCode(value){
   return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
 }
@@ -1337,21 +1332,14 @@ function onlineSend(type,payload={}){
     return false;
   }
 }
-function onlineClearTimer(name){
-  const id=globalThis[name];
-  if(id)clearTimeout(id);
-  globalThis[name]=null;
+function onlineMakeActionId(){
+  const p=(onlineClientKey||'c').replace(/[^a-zA-Z0-9]/g,'').slice(-8);
+  return `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
 }
-function onlineClearSaveRetry(){
-  if(onlineSaveRetryTimer){
-    clearTimeout(onlineSaveRetryTimer);
-    onlineSaveRetryTimer=null;
-  }
-}
-function onlineClearStartRetry(){
-  if(onlineStartRetryTimer){
-    clearTimeout(onlineStartRetryTimer);
-    onlineStartRetryTimer=null;
+function onlineClearActionRetry(){
+  if(onlineActionRetryTimer){
+    clearTimeout(onlineActionRetryTimer);
+    onlineActionRetryTimer=null;
   }
 }
 function onlineClearSync(){
@@ -1366,12 +1354,48 @@ function onlineClearReconnect(){
     onlineReconnectTimer=null;
   }
 }
-function onlineBothReady(){
-  const ps=onlinePlayers.filter(p=>p.side);
-  return ps.length>=2&&ps.every(p=>p.ready);
+function onlineSendPendingAction(){
+  if(!onlinePendingAction||!onlineSocketOpen())return;
+  onlineSend(onlinePendingAction.type,onlinePendingAction.payload);
+
+  onlineClearActionRetry();
+  onlineActionRetryTimer=setTimeout(()=>{
+    onlineActionRetryTimer=null;
+    if(!onlinePendingAction)return;
+    onlineSend('sync',{knownRevision:onlineRevision});
+    onlineSendPendingAction();
+  },500);
 }
-function onlineMakeId(prefix='c'){
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
+function onlineQueueAction(type,payload={}){
+  if(!onlineSocketOpen()||onlinePendingAction)return false;
+  const actionId=onlineMakeActionId();
+  onlinePendingAction={
+    type,
+    actionId,
+    payload:{...payload,actionId}
+  };
+  onlineSendPendingAction();
+  updateUI();
+  renderOnlineLobby();
+  return true;
+}
+function onlineAckAction(actionId){
+  if(!actionId||!onlinePendingAction)return;
+  if(actionId!==onlinePendingAction.actionId)return;
+  onlineClearActionRetry();
+  onlinePendingAction=null;
+  updateUI();
+  renderOnlineLobby();
+}
+function onlineScheduleSync(delay=1000){
+  onlineClearSync();
+  if(!onlineSocketOpen()||!onlineRoomCode)return;
+  onlineSyncTimer=setTimeout(()=>{
+    onlineSyncTimer=null;
+    if(!onlineSocketOpen()||!onlineRoomCode)return;
+    onlineSend('sync',{knownRevision:onlineRevision});
+    onlineScheduleSync(1000);
+  },delay);
 }
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
@@ -1384,235 +1408,60 @@ function renderOnlineLobby(){
   const blue=onlinePlayers.find(p=>p.side==='blue');
   const label=p=>{
     if(!p)return 'ожидание…';
-    const who=p.id===onlinePlayerId?'ты':'игрок подключён';
+    const who=p.id&&p.id===onlinePlayerId?'ты':(p.connected?'игрок подключён':'переподключается…');
     return `${who}${p.ready?' · готов':''}`;
   };
 
   onlineRedPlayerEl.textContent=label(red);
   onlineBluePlayerEl.textContent=label(blue);
-  onlineRedDot.classList.toggle('on',!!red);
-  onlineBlueDot.classList.toggle('on',!!blue);
+  onlineRedDot.classList.toggle('on',!!red?.connected);
+  onlineBlueDot.classList.toggle('on',!!blue?.connected);
 
-  if(onlineSide){
-    const sideText=onlineSide==='red'?'красные':'синие';
-    const count=onlinePlayers.filter(p=>p.side).length;
-
-    if(onlineMatchActive){
-      onlineStatusEl.textContent=`Матч запущен · серверная версия ${onlineRevision}`;
-    }else if(count<2){
-      onlineStatusEl.textContent=`Ты — ${sideText}. Отправь код второму игроку.`;
-    }else if(onlineBothReady()){
-      onlineStatusEl.textContent='Оба готовы · ждём подтверждение сервера…';
-    }else{
-      onlineStatusEl.textContent=`Ты — ${sideText}. Оба игрока должны нажать «Готов».`;
-    }
+  if(onlineCreatingRoom){
+    onlineStatusEl.textContent='Сервер создаёт комнату…';
+  }else if(onlineMatchActive){
+    onlineStatusEl.textContent=`Матч работает на сервере · версия ${onlineRevision}`;
+  }else if(onlineSide){
+    const connected=onlinePlayers.filter(p=>p.connected).length;
+    if(connected<2)onlineStatusEl.textContent=`Ты — ${onlineSide==='red'?'красные':'синие'}. Ждём второго игрока.`;
+    else if(onlinePlayers.filter(p=>p.side).every(p=>p.ready))onlineStatusEl.textContent='Оба готовы · сервер запускает матч…';
+    else onlineStatusEl.textContent='Оба игрока должны нажать «Готов».';
   }else if(hasRoom){
-    onlineStatusEl.textContent='Подключение к комнате…';
+    onlineStatusEl.textContent='Входим в комнату…';
   }
 
-  onlineReadyBtn.disabled=!onlineSide||onlinePlayers.filter(p=>p.side).length<2||!onlineSocketOpen()||onlineMatchActive;
-  onlineReadyBtn.classList.toggle('ready',onlineReadyWanted);
-  onlineReadyBtn.textContent=onlineReadyWanted?'✓ Готов':'Готов';
-}
-function onlineStopAllNetworkTimers(){
-  onlineClearSaveRetry();
-  onlineClearStartRetry();
-  onlineClearSync();
-  onlineClearReconnect();
-}
-function onlineDisconnect(clearRoom=true){
-  onlineManualDisconnect=true;
-  onlineStopAllNetworkTimers();
-
-  const ws=onlineSocket;
-  if(ws&&ws.readyState===WebSocket.OPEN){
-    try{ws.send(JSON.stringify({type:'leave'}))}catch{}
-  }
-  onlineSocket=null;
-  if(ws){
-    try{ws.onclose=null;ws.close(1000,'leave')}catch{}
-  }
-
-  onlinePlayerId=null;
-  onlineSide=null;
-  onlinePlayers=[];
-  onlineReady=false;
-  onlineReadyWanted=false;
-  onlineGameStartSent=false;
-  onlineMatchActive=false;
-  onlineRemoteMoving=false;
-  onlineAuthority=false;
-  onlineRevision=0;
-  onlinePendingSave=null;
-  onlineStartPending=null;
-  if(clearRoom)onlineRoomCode='';
-  renderOnlineLobby();
-  onlineBadge?.classList.remove('show');
-
-  // allow future manual connection
-  setTimeout(()=>{onlineManualDisconnect=false},0);
-}
-function onlineOpenSetup(){
-  pushSetupHistory();
-  gameMode='online';
-  sideController={red:'p1',blue:'p2'};
-  onlineDisconnect(true);
-  showSetupScreen('online');
-}
-function onlineScheduleReconnect(){
-  onlineClearReconnect();
-  if(onlineManualDisconnect||!onlineRoomCode)return;
-
-  onlineReconnectTimer=setTimeout(()=>{
-    onlineReconnectTimer=null;
-    if(onlineManualDisconnect||onlineSocketOpen()||!onlineRoomCode)return;
-    onlineConnectRoom(onlineRoomCode,true);
-  },1000);
-}
-function onlineConnectRoom(code,reconnecting=false){
-  code=onlineNormalizeRoomCode(code);
-  if(code.length<4){showToast('Код комнаты слишком короткий');return}
-
-  if(!reconnecting){
-    onlineManualDisconnect=true;
-    onlineStopAllNetworkTimers();
-    const oldWs=onlineSocket;
-    onlineSocket=null;
-    if(oldWs){
-      try{oldWs.onclose=null;oldWs.close(1000,'replace')}catch{}
-    }
-    onlinePlayerId=null;
-    onlineSide=null;
-    onlinePlayers=[];
-    onlineReady=false;
-    onlineReadyWanted=false;
-    onlineGameStartSent=false;
-    onlineMatchActive=false;
-    onlineRemoteMoving=false;
-    onlineAuthority=false;
-    onlineRevision=0;
-    onlinePendingSave=null;
-    onlineStartPending=null;
-    onlineManualDisconnect=false;
-  }
-
-  onlineRoomCode=code;
-  gameMode='online';
-  sideController={red:'p1',blue:'p2'};
-  renderOnlineLobby();
-
-  let ws;
-  try{
-    ws=new WebSocket(`${ONLINE_SERVER}/room/${encodeURIComponent(code)}`);
-  }catch{
-    onlineStatusEl.textContent='Не удалось открыть соединение';
-    renderOnlineLobby();
-    onlineScheduleReconnect();
-    return;
-  }
-
-  onlineSocket=ws;
-  onlineStatusEl.textContent=reconnecting?'Переподключение…':'Подключение к серверу…';
-  renderOnlineLobby();
-
-  ws.onopen=()=>{
-    if(ws!==onlineSocket)return;
-    onlineStatusEl.textContent='Соединение установлено. Входим в комнату…';
-    onlineSend('join',{room:code,clientKey:onlineClientKey});
-    renderOnlineLobby();
-  };
-  ws.onmessage=e=>{
-    if(ws!==onlineSocket)return;
-    try{
-      onlineHandleMessage(JSON.parse(e.data));
-    }catch(err){
-      console.warn('online message',err);
-    }
-  };
-  ws.onerror=()=>{
-    if(ws!==onlineSocket)return;
-    onlineStatusEl.textContent='Ошибка соединения · переподключаемся…';
-    renderOnlineLobby();
-  };
-  ws.onclose=()=>{
-    if(ws!==onlineSocket)return;
-    onlineSocket=null;
-    onlineClearSaveRetry();
-    onlineClearStartRetry();
-    onlineClearSync();
-
-    if(!onlineManualDisconnect&&onlineRoomCode){
-      if(onlineMatchActive)showToast('Связь потеряна · переподключаемся');
-      else{
-        onlineStatusEl.textContent='Связь потеряна · переподключаемся…';
-        renderOnlineLobby();
-      }
-      onlineScheduleReconnect();
-    }
-  };
-}
-function onlinePrepareStandardMatch(){
-  gameMode='online';
-  sideController={red:'p1',blue:'p2'};
-  kitConfig={red:defaultKitIds(),blue:defaultKitIds()};
-  jackHardness={red:'soft',blue:'soft'};
-  ballAllocation={red:defaultAllocationForSide('red'),blue:defaultAllocationForSide('blue')};
-}
-function onlineSerializeObject(b){
-  if(!b)return null;
-  const c=court();
-  const realism=b.realism?onlineClone(b.realism):null;
-  if(realism)realism.startSpeed=0;
-  return{
-    kind:b.kind,side:b.side,
-    u:(b.x-c.x)/Math.max(1,c.w),v:(b.y-c.y)/Math.max(1,c.h),
-    z:(b.z||0)/Math.max(1,c.w),
-    vu:(b.vx||0)/Math.max(1,c.w),vv:(b.vy||0)/Math.max(1,c.h),vz:(b.vz||0)/Math.max(1,c.w),
-    hardnessId:b.hardnessId||null,entered:!!b.entered,hitCd:b.hitCd||0,realism
-  };
+  const twoConnected=onlinePlayers.filter(p=>p.connected).length>=2;
+  onlineReadyBtn.disabled=!onlineSide||!twoConnected||!onlineSocketOpen()||onlineMatchActive||!!onlinePendingAction;
+  onlineReadyBtn.classList.toggle('ready',onlineReady);
+  onlineReadyBtn.textContent=onlinePendingAction?.type==='ready'?'Отправляем…':(onlineReady?'✓ Готов':'Готов');
 }
 function onlineDeserializeObject(o){
   if(!o)return null;
   const c=court();
   return{
-    kind:o.kind,side:o.side,
-    x:c.x+o.u*c.w,y:c.y+o.v*c.h,z:(o.z||0)*c.w,
-    vx:(o.vu||0)*c.w,vy:(o.vv||0)*c.h,vz:(o.vz||0)*c.w,
-    r:ballR(),hitCd:o.hitCd||0,entered:!!o.entered,
+    kind:o.kind,
+    side:o.side,
+    x:c.x+(Number(o.u)||0)*c.w,
+    y:c.y+(Number(o.v)||0)*c.h,
+    z:(Number(o.z)||0)*c.w,
+    vx:0,vy:0,vz:0,
+    r:ballR(),hitCd:0,
+    entered:!!o.entered,
     hardnessId:o.hardnessId||(o.kind==='jack'?'soft':'medium'),
     realism:o.realism?onlineClone(o.realism):null
   };
 }
-function onlineExportState(){
-  return{
-    version:10,
-    revision:onlineRevision,
-    matchFormat,fieldOrientation,realisticMode,totalEnds,endNo,
-    redScore,blueScore,redLeft,blueLeft,phase,currentJackBox,
-    activePlayerBox:onlineClone(activePlayerBox),firstColourLockedBox:onlineClone(firstColourLockedBox),
-    lastColourSide,jackNeedsCross,tieBreak,tieFirst,equidistantSequence,equidistantNextSide,
-    selectedBall:onlineClone(selectedBall),jackHardness:onlineClone(jackHardness),
-    currentJackHardness,kitConfig:onlineClone(kitConfig),ballAllocation:onlineClone(ballAllocation),
-    ballInventory:onlineClone(ballInventory),launcherPositions:onlineClone(launcherPositions),
-    jack:onlineSerializeObject(jack),balls:balls.map(onlineSerializeObject),matchStarted,
-    modal:phase==='finished'?{title:modalTitle.textContent,text:modalText.textContent}:null
-  };
-}
-function onlineApplyState(s,revision=null){
+function onlineApplyState(s,revision=0){
   if(!s)return false;
   const incoming=Number(revision??s.revision??0)||0;
   if(incoming<onlineRevision)return false;
 
   const keepSide=onlineSide;
-  if(incoming)onlineRevision=incoming;
+  onlineRevision=incoming;
 
-  balls=[];jack=null;
   matchFormat=s.matchFormat||'individual';
   fieldOrientation=s.fieldOrientation==='horizontal'?'horizontal':'vertical';
   realisticMode=!!s.realisticMode;
-  renderFormatButtons();
-  resize();
-
   totalEnds=s.totalEnds??formatConfig().totalEnds;
   endNo=s.endNo??1;
   redScore=s.redScore??0;
@@ -1636,18 +1485,20 @@ function onlineApplyState(s,revision=null){
   ballAllocation=onlineClone(s.ballAllocation||ballAllocation);
   ballInventory=onlineClone(s.ballInventory||{red:[],blue:[]});
   launcherPositions=onlineClone(s.launcherPositions||launcherPositions);
-
   jack=onlineDeserializeObject(s.jack);
   balls=(s.balls||[]).map(onlineDeserializeObject);
-
   matchStarted=s.matchStarted!==false;
+
   lastShot=null;
   settleFrames=0;
   onlineRemoteMoving=false;
-
+  onlineAuthority=false;
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
   onlineSide=keepSide;
+
+  renderFormatButtons();
+  resize();
 
   if(s.modal){
     modalTitle.textContent=s.modal.title||'Матч окончен';
@@ -1660,265 +1511,276 @@ function onlineApplyState(s,revision=null){
   updateUI();
   return true;
 }
-function onlineEnterStartedMatch(state,revision=0){
-  onlineClearStartRetry();
-  onlineStartPending=null;
-  onlineGameStartSent=true;
+function onlineEnterMatch(state,revision){
   onlineMatchActive=true;
-  onlineRemoteMoving=false;
-  onlineAuthority=false;
+  onlineGameStartSent=true;
   gameMode='online';
+  sideController={red:'p1',blue:'p2'};
   setupOverlay.classList.remove('show');
+  startNoticeEl.classList.remove('show');
+  preStartPause=false;
   onlineBadge?.classList.add('show');
-
   onlineApplyState(state,revision);
   relayoutSoon();
   updateUI();
-  showStartNotice(
-    'Онлайн-матч',
-    `Ты играешь за ${onlineSide==='red'?'красных':'синих'}. Состояние матча хранится на сервере.`
-  );
-  onlineScheduleSync(150);
+  showToast(`Онлайн · ты за ${onlineSide==='red'?'красных':'синих'}`);
 }
-function onlineScheduleSync(delay=null){
-  onlineClearSync();
-  if(!onlineRoomCode||!onlineSocketOpen())return;
-
-  let ms=delay;
-  if(ms==null){
-    if(!onlineMatchActive)ms=700;
-    else if(onlinePendingSave)ms=450;
-    else{
-      const s=currentSide();
-      ms=(s&&s!==onlineSide)?750:1800;
-    }
-  }
-
-  onlineSyncTimer=setTimeout(()=>{
-    onlineSyncTimer=null;
-    if(!onlineRoomCode||!onlineSocketOpen())return;
-
-    onlineSend('sync_request',{knownRevision:onlineRevision});
-
-    // READY is deliberately repeated until server confirms it.
-    if(!onlineMatchActive&&onlineSide&&onlineReadyWanted!==onlineReady){
-      onlineSend('ready',{ready:onlineReadyWanted});
-    }
-
-    onlineScheduleSync();
-  },ms);
-}
-function onlineBuildInitialState(){
-  onlinePrepareStandardMatch();
-
-  // Build the game behind the lobby without sending any network transition.
-  const keepMode=gameMode;
-  gameMode='local';
-  resetMatch();
-  gameMode=keepMode;
-  sideController={red:'p1',blue:'p2'};
-
-  return onlineExportState();
-}
-function onlineMaybeStartMatch(){
-  if(onlineMatchActive||onlineSide!=='red'||!onlineBothReady()||!onlineSocketOpen())return;
-
-  if(!onlineStartPending){
-    onlineStartPending={
-      startId:onlineMakeId('start'),
-      state:onlineBuildInitialState()
-    };
-  }
-
-  onlineGameStartSent=true;
-  onlineSend('start_match',onlineStartPending);
-
-  onlineClearStartRetry();
-  onlineStartRetryTimer=setTimeout(()=>{
-    onlineStartRetryTimer=null;
-    if(!onlineMatchActive&&onlineStartPending&&onlineBothReady()){
-      onlineMaybeStartMatch();
-    }
-  },500);
-}
-function onlineSendPendingSave(){
-  if(!onlinePendingSave||!onlineSocketOpen())return;
-
-  // SAME commitId + SAME state is sent repeatedly until the server confirms it.
-  onlineSend('save_state',onlinePendingSave);
-
-  onlineClearSaveRetry();
-  onlineSaveRetryTimer=setTimeout(()=>{
-    onlineSaveRetryTimer=null;
-    if(!onlinePendingSave)return;
-    onlineSend('sync_request',{knownRevision:onlineRevision});
-    onlineSendPendingSave();
-  },500);
-}
-function onlineQueueSave(reason='shot_result'){
-  if(gameMode!=='online'||!onlineMatchActive||!onlineAuthority||!onlineSocketOpen())return;
-  if(onlinePendingSave)return;
-
-  onlinePendingSave={
-    commitId:onlineMakeId('save'),
-    baseRevision:onlineRevision,
-    reason,
-    state:onlineExportState()
-  };
-
-  updateUI();
-  onlineSendPendingSave();
-  onlineScheduleSync(250);
-}
-function onlineAcceptServerState(state,revision,meta={}){
-  const incoming=Number(revision??state?.revision??0)||0;
-  if(!state)return;
-
-  // A newer server revision always wins.
-  if(incoming>onlineRevision){
-    const wasOwnPending=!!onlinePendingSave&&(
-      !meta.commitId||meta.commitId===onlinePendingSave.commitId
-    );
-
-    onlineClearSaveRetry();
-    onlinePendingSave=null;
-    onlineAuthority=false;
-
-    if(!onlineMatchActive){
-      onlineEnterStartedMatch(state,incoming);
-    }else{
-      onlineApplyState(state,incoming);
-      onlineScheduleSync(150);
-    }
-    return;
-  }
-
-  // Exact ACK for our repeated save.
-  if(
-    onlinePendingSave &&
-    meta.commitId &&
-    meta.commitId===onlinePendingSave.commitId &&
-    incoming>=onlineRevision
-  ){
-    onlineClearSaveRetry();
-    onlinePendingSave=null;
-    onlineAuthority=false;
-    onlineApplyState(state,incoming);
-    onlineScheduleSync(150);
-  }
-}
-function onlineHandleRoomPlayers(players){
-  onlinePlayers=Array.isArray(players)?players:[];
+function onlineHandleRoomState(data){
+  onlinePlayers=Array.isArray(data.players)?data.players:[];
   const me=onlinePlayers.find(p=>p.id===onlinePlayerId);
   if(me)onlineReady=!!me.ready;
 
-  renderOnlineLobby();
-
-  if(!onlineMatchActive&&onlineBothReady()){
-    if(onlineSide==='red')onlineMaybeStartMatch();
+  if(data.config){
+    matchFormat=data.config.matchFormat||matchFormat;
+    fieldOrientation=data.config.fieldOrientation==='horizontal'?'horizontal':'vertical';
+    realisticMode=!!data.config.realisticMode;
+    renderFormatButtons();
   }
+
+  onlineAckAction(data.ackActionId);
+  renderOnlineLobby();
 }
 function onlineHandleMessage(data){
   if(!data||typeof data!=='object')return;
-
-  if(data.type==='room_full'){
-    onlineStatusEl.textContent='Комната занята';
-    showToast('В этой комнате уже два игрока');
-    renderOnlineLobby();
-    return;
-  }
 
   if(data.type==='joined'){
     onlinePlayerId=data.playerId;
     onlineSide=data.side;
     onlineReady=!!data.ready;
-    if(typeof data.revision==='number')onlineRevision=data.revision;
-
-    if(data.state&&data.state.phase){
-      onlineEnterStartedMatch(data.state,data.revision||0);
-    }else{
-      renderOnlineLobby();
-      onlineSend('sync_request',{knownRevision:onlineRevision});
-      onlineScheduleSync(200);
-      if(onlineReadyWanted)onlineSend('ready',{ready:true});
+    onlineRevision=Number(data.revision)||0;
+    if(data.config){
+      matchFormat=data.config.matchFormat||matchFormat;
+      fieldOrientation=data.config.fieldOrientation==='horizontal'?'horizontal':'vertical';
+      realisticMode=!!data.config.realisticMode;
+      renderFormatButtons();
     }
+    if(Array.isArray(data.players))onlinePlayers=data.players;
+    renderOnlineLobby();
+    if(data.state)onlineEnterMatch(data.state,data.revision||0);
+    onlineSend('sync',{knownRevision:onlineRevision});
+    onlineScheduleSync(250);
+    if(onlinePendingAction)onlineSendPendingAction();
     return;
   }
 
   if(data.type==='room_state'){
-    onlineHandleRoomPlayers(data.players);
+    onlineHandleRoomState(data);
     return;
   }
 
   if(data.type==='snapshot'){
-    if(Array.isArray(data.players))onlineHandleRoomPlayers(data.players);
-
-    if(data.state&&data.state.phase){
-      onlineAcceptServerState(data.state,data.revision||0,{
-        commitId:data.commitId||null
-      });
-    }else if(!onlineMatchActive&&onlineBothReady()&&onlineSide==='red'){
-      onlineMaybeStartMatch();
-    }
-    return;
-  }
-
-  if(data.type==='state_saved'){
-    onlineAcceptServerState(data.state,data.revision||0,{
-      commitId:data.commitId||null
-    });
-    return;
-  }
-
-  if(data.type==='state_conflict'){
-    onlineClearSaveRetry();
-    onlinePendingSave=null;
-    onlineAuthority=false;
-
+    if(Array.isArray(data.players))onlinePlayers=data.players;
+    onlineAckAction(data.ackActionId);
     if(data.state){
-      onlineApplyState(data.state,data.revision||0);
-      showToast('Состояние обновлено с сервера');
+      if(!onlineMatchActive)onlineEnterMatch(data.state,data.revision||0);
+      else onlineApplyState(data.state,data.revision||0);
     }
-    onlineScheduleSync(150);
+    renderOnlineLobby();
     return;
   }
 
-  if(data.type==='start_rejected'){
-    onlineClearStartRetry();
-    onlineStartPending=null;
-    onlineGameStartSent=false;
-
+  if(data.type==='action_error'){
+    onlineAckAction(data.ackActionId);
     if(data.state){
-      onlineEnterStartedMatch(data.state,data.revision||0);
-    }else{
-      onlineScheduleSync(250);
+      if(!onlineMatchActive)onlineEnterMatch(data.state,data.revision||0);
+      else onlineApplyState(data.state,data.revision||0);
     }
+    showToast(data.message||'Сервер отклонил действие');
+    return;
+  }
+
+  if(data.type==='room_full'){
+    showToast('Комната занята');
+    onlineStatusEl.textContent='В комнате уже два игрока';
+    renderOnlineLobby();
     return;
   }
 
   if(data.type==='restart'){
-    onlineClearSaveRetry();
-    onlineClearStartRetry();
-    onlinePendingSave=null;
-    onlineStartPending=null;
-    onlineRevision=0;
+    onlineAckAction(data.ackActionId);
     onlineMatchActive=false;
-    onlineAuthority=false;
+    onlineRevision=0;
+    onlineReady=false;
+    modal.classList.remove('show');
     setupOverlay.classList.add('show');
     showSetupScreen('online');
     renderOnlineLobby();
-    onlineScheduleSync(200);
     return;
   }
 }
-function onlineMaybeLiveSync(){
-  // Intentionally empty.
-  // There is NO online animation/state streaming in SERVER-TRUTH mode.
+function onlineScheduleReconnect(){
+  onlineClearReconnect();
+  if(onlineManualDisconnect||!onlineRoomCode)return;
+  onlineReconnectTimer=setTimeout(()=>{
+    onlineReconnectTimer=null;
+    if(onlineManualDisconnect||onlineSocketOpen()||!onlineRoomCode)return;
+    onlineConnectRoom(onlineRoomCode,true);
+  },900);
 }
-function onlineSendAuthoritativeState(type='shot_result'){
-  onlineQueueSave(type);
-}
+function onlineConnectRoom(code,reconnecting=false){
+  code=onlineNormalizeRoomCode(code);
+  if(code.length<4){showToast('Неверный код комнаты');return}
 
+  onlineRoomCode=code;
+  gameMode='online';
+  sideController={red:'p1',blue:'p2'};
+
+  if(!reconnecting){
+    onlineClearActionRetry();
+    onlineClearSync();
+    onlineClearReconnect();
+    onlinePendingAction=null;
+    onlinePlayerId=null;
+    onlineSide=null;
+    onlinePlayers=[];
+    onlineReady=false;
+    onlineMatchActive=false;
+    onlineRevision=0;
+  }
+
+  const previous=onlineSocket;
+  onlineSocket=null;
+  if(previous){
+    try{previous.onclose=null;previous.close(1000,'replace')}catch{}
+  }
+
+  renderOnlineLobby();
+
+  let ws;
+  try{
+    ws=new WebSocket(`${ONLINE_SERVER}/room/${encodeURIComponent(code)}`);
+  }catch{
+    onlineStatusEl.textContent='Не удалось открыть соединение';
+    renderOnlineLobby();
+    onlineScheduleReconnect();
+    return;
+  }
+
+  onlineSocket=ws;
+  onlineStatusEl.textContent=reconnecting?'Переподключение…':'Подключение…';
+  renderOnlineLobby();
+
+  ws.onopen=()=>{
+    if(ws!==onlineSocket)return;
+    onlineSend('join',{clientKey:onlineClientKey});
+  };
+  ws.onmessage=e=>{
+    if(ws!==onlineSocket)return;
+    try{onlineHandleMessage(JSON.parse(e.data))}
+    catch(err){console.warn('online message',err)}
+  };
+  ws.onerror=()=>{
+    if(ws!==onlineSocket)return;
+    onlineStatusEl.textContent='Ошибка соединения';
+    renderOnlineLobby();
+  };
+  ws.onclose=()=>{
+    if(ws!==onlineSocket)return;
+    onlineSocket=null;
+    onlineClearActionRetry();
+    onlineClearSync();
+    if(!onlineManualDisconnect&&onlineRoomCode){
+      if(onlineMatchActive)showToast('Связь потеряна · переподключаемся');
+      else onlineStatusEl.textContent='Связь потеряна · переподключаемся…';
+      renderOnlineLobby();
+      onlineScheduleReconnect();
+    }
+  };
+}
+async function onlineCreateRoom(){
+  if(onlineCreatingRoom)return;
+  onlineCreatingRoom=true;
+  gameMode='online';
+  sideController={red:'p1',blue:'p2'};
+  onlineRoomCode='';
+  renderOnlineLobby();
+
+  try{
+    const params=new URLSearchParams({
+      clientKey:onlineClientKey,
+      format:matchFormat,
+      orientation:fieldOrientation,
+      realism:realisticMode?'1':'0'
+    });
+    const r=await fetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
+      method:'GET',cache:'no-store'
+    });
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();
+    if(!data?.code)throw new Error('Нет кода комнаты');
+    onlineRoomCode=onlineNormalizeRoomCode(data.code);
+    onlineConnectRoom(onlineRoomCode,false);
+  }catch(err){
+    console.warn(err);
+    onlineRoomCode='';
+    showToast('Не удалось создать комнату');
+    onlineStatusEl.textContent='Сервер недоступен';
+    renderOnlineLobby();
+  }finally{
+    onlineCreatingRoom=false;
+    renderOnlineLobby();
+  }
+}
+async function onlineJoinRoom(code){
+  code=onlineNormalizeRoomCode(code);
+  if(code.length<4){showToast('Неверный код комнаты');return}
+
+  try{
+    const r=await fetch(`${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,{
+      method:'GET',cache:'no-store'
+    });
+    if(r.status===404){showToast('Комната не найдена');return}
+    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    onlineConnectRoom(code,false);
+  }catch(err){
+    console.warn(err);
+    showToast('Не удалось проверить комнату');
+  }
+}
+function onlineDisconnect(clearRoom=true){
+  onlineManualDisconnect=true;
+  onlineClearActionRetry();
+  onlineClearSync();
+  onlineClearReconnect();
+
+  const ws=onlineSocket;
+  onlineSocket=null;
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    try{ws.send(JSON.stringify({type:'leave'}))}catch{}
+  }
+  if(ws){
+    try{ws.onclose=null;ws.close(1000,'leave')}catch{}
+  }
+
+  onlinePendingAction=null;
+  onlinePlayerId=null;
+  onlineSide=null;
+  onlinePlayers=[];
+  onlineReady=false;
+  onlineGameStartSent=false;
+  onlineMatchActive=false;
+  onlineRemoteMoving=false;
+  onlineAuthority=false;
+  onlineRevision=0;
+  if(clearRoom)onlineRoomCode='';
+
+  renderOnlineLobby();
+  onlineBadge?.classList.remove('show');
+  setTimeout(()=>{onlineManualDisconnect=false},0);
+}
+function onlineOpenSetup(){
+  pushSetupHistory();
+  gameMode='online';
+  sideController={red:'p1',blue:'p2'};
+  onlineDisconnect(true);
+  showSetupScreen('online');
+}
+function onlineMaybeLiveSync(){
+  // Deliberately empty: no online physics/state streaming in the browser.
+}
+function onlineSendAuthoritativeState(){
+  // Legacy compatibility hook. Server owns all online transitions.
+}
 function clearSetupTimers(){
   for(const id of setupTimers)clearTimeout(id);
   setupTimers=[];
@@ -2946,7 +2808,6 @@ function startRegulationEnd(){
   activePlayerBox[jackSide]=currentJackBox;
   phase=sidePhase(jackSide,'jack');updateUI();
   scheduleBotIfNeeded('jack',650);
-  if(gameMode==='online')setTimeout(()=>onlineQueueSave('state_transition'),0);
 }
 function startTieBreak(firstSide){
   clearTimeout(botTimer);balls=[];redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;lastShot=null;
@@ -2964,7 +2825,6 @@ function startTieBreak(firstSide){
   phase=firstSide;updateUI();
   showToast(`Тай-брейк · первым ${sideOwnerName(firstSide)}`);
   scheduleBotIfNeeded('colour',650);
-  if(gameMode==='online')setTimeout(()=>onlineQueueSave('state_transition'),0);
 }
 function playerSelectionLocked(side){
   return !!firstColourLockedBox[side] && phase===side;
@@ -2973,6 +2833,10 @@ function selectPlayerBox(side,box){
   if(!humanTurn()||currentSide()!==side)return;
   if(playerSelectionLocked(side))return;
   if(remainingForBox(side,box)<=0)return;
+  if(gameMode==='online'){
+    onlineQueueAction('select_player',{box});
+    return;
+  }
   activePlayerBox[side]=box;
   ensureSelectedBall(side);
   updateUI();
@@ -3054,6 +2918,10 @@ function renderBallSelector(){
     btn.disabled=!humanColour||used;
     btn.addEventListener('click',()=>{
       if(!humanColour||used)return;
+      if(gameMode==='online'){
+        if(onlineQueueAction('select_ball',{hardnessId:t.id}))tone(545,.018,.007);
+        return;
+      }
       selectedBall[side]=t.id;
       tone(545,.018,.007);
       updateUI();
@@ -3089,7 +2957,9 @@ function updateUI(){
       ?`ЗАДАЧА · ${puzzle.difficulty}`
       :(tieBreak?'ТАЙ-БРЕЙК':`${formatConfig().label} · энд ${endNo} / ${totalEnds}`);
 
-  if(phase==='trainingEdit'){
+  if(gameMode==='online'&&onlinePendingAction){
+    statusEl.textContent=onlinePendingAction.type==='throw'?'Сервер рассчитывает бросок…':'Сервер подтверждает действие…';
+  }else if(phase==='trainingEdit'){
     statusEl.textContent='Расставь ситуацию';
   }else if(phase==='jackRed'||phase==='jackBlue'){
     const s=currentSide();statusEl.textContent=`${sideOwnerName(s)} · бокс ${currentJackBox} · джек`;
@@ -3099,9 +2969,7 @@ function updateUI(){
     statusEl.textContent=gameMode==='puzzle'&&puzzle
       ?`${puzzle.short} · ${ballsLeft(puzzle.side)} мяч.`
       :`${sideOwnerName(s)} · бокс ${activePlayerBox[s]} · ${ballsLeft(s)}${hardness}`;
-  }else if(gameMode==='online'&&onlinePendingSave)statusEl.textContent='Сохраняем ход на сервере…';
-  else if(gameMode==='online'&&currentSide()&&currentSide()!==onlineSide)statusEl.textContent='Ход соперника…';
-  else if(phase==='moving')statusEl.textContent='Мяч катится…';
+  }else if(phase==='moving')statusEl.textContent=gameMode==='online'&&onlineRemoteMoving?'Соперник бросает…':'Мяч катится…';
   else if(phase==='end')statusEl.textContent='Подсчёт очков';
   else statusEl.textContent='Матч окончен';
 
@@ -3134,6 +3002,15 @@ function launchHuman(){
   if(!humanTurn())return;
   const side=currentSide();
   const kind=(phase==='jackRed'||phase==='jackBlue')?'jack':'colour';
+
+  if(gameMode==='online'){
+    if(onlineQueueAction('throw',{angle:aimAngle,power:aimPower})){
+      tone(kind==='jack'?520:(side==='red'?260:190),.06,.03);
+      updateUI();
+    }
+    return;
+  }
+
   const pos=launcherFor(side),a=aimAngle*Math.PI/180,speed=speedFromPower();
   const hardnessId=kind==='colour'?ensureSelectedBall(side):(jackHardness[side]||'soft');
   const launch=applyRealismToLaunch(Math.sin(a)*speed,-Math.cos(a)*speed,kind==='jack'?'jack':side,hardnessId);
@@ -3149,12 +3026,6 @@ function launchHuman(){
   }
   lastShot={kind,side,ball:b,fouled:false};
   phase='moving';
-  if(gameMode==='online'){
-    // Physics happens only on this device. Nothing is streamed.
-    // The opponent keeps seeing the last server-confirmed turn.
-    onlineAuthority=true;
-    onlineRemoteMoving=false;
-  }
   tone(kind==='jack'?520:(side==='red'?260:190),.06,.03);updateUI();
 }
 function declineRemaining(){
@@ -3165,6 +3036,11 @@ function declineRemaining(){
   const count=ballsLeft(side);
   if(!window.confirm(`Отказаться от ${count} оставшихся мячей? Они станут Dead Ball.`))return;
 
+  if(gameMode==='online'){
+    onlineQueueAction('decline',{});
+    return;
+  }
+
   for(const item of ballInventory[side])item.used=true;
   setBallsLeft(side,0);
   showToast(`${sideOwnerName(side)}: оставшиеся мячи не играются`);
@@ -3174,10 +3050,6 @@ function declineRemaining(){
     phase=other;updateUI();scheduleBotIfNeeded('colour',520);
   }else{
     finishEnd();
-  }
-  if(gameMode==='online'){
-    onlineAuthority=true;
-    if(phase!=='end')onlineQueueSave('decline');
   }
 }
 
@@ -4508,12 +4380,6 @@ function resolveStoppedShot(){
   if(!lastShot)return;
   if(lastShot.kind==='jack')resolveJackThrow();
   else resolveColourThrow();
-
-  if(gameMode==='online'){
-    if(phase!=='end')onlineQueueSave('shot_result');
-    // If the end finished, finishEnd() immediately advances the online match
-    // and that next canonical state is what gets saved.
-  }
 }
 
 function scoreCurrentEnd(){
@@ -4568,11 +4434,11 @@ function finishEnd(){
     if(pts.red===pts.blue){
       showToast('Тай-брейк равный — ещё один');
       const nextFirst=tieFirst==='red'?'blue':'red';
-      setTimeout(()=>startTieBreak(nextFirst),gameMode==='online'?0:1450);
+      setTimeout(()=>startTieBreak(nextFirst),1450);
     }else{
       const winner=pts.red>pts.blue?'red':'blue';
       showToast(`Тай-брейк выиграл ${sideOwnerName(winner)}`);
-      setTimeout(()=>finishMatch(winner,true),gameMode==='online'?0:1450);
+      setTimeout(()=>finishMatch(winner,true),1450);
     }
     return;
   }
@@ -4592,7 +4458,7 @@ function finishEnd(){
     }else{
       endNo++;startRegulationEnd();
     }
-  },gameMode==='online'?0:1450);
+  },1450);
 }
 function finishMatch(winner,byTieBreak){
   phase='finished';updateUI();
@@ -4601,12 +4467,11 @@ function finishMatch(winner,byTieBreak){
     ?`Основной матч ${redScore}:${blueScore}. Победитель определён в тай-брейке.`
     :`Финальный счёт ${redScore}:${blueScore}.`;
   modal.classList.add('show');tone(640,.16,.04);
-  if(gameMode==='online')setTimeout(()=>onlineQueueSave('state_transition'),0);
 }
 
 function physics(){
   if(phase==='trainingEdit')return;
-  if(gameMode==='online'&&onlineRemoteMoving)return;
+  if(gameMode==='online')return;
   const c=court(),throwY=throwingY();
 
   for(const b of allObjects()){
@@ -4989,21 +4854,18 @@ vsBotBtn.addEventListener('click',()=>{
 });
 localBtn.addEventListener('click',()=>beginColourToss('local'));
 onlineBtn?.addEventListener('click',onlineOpenSetup);
-onlineCreateBtn?.addEventListener('click',()=>onlineConnectRoom(onlineGenerateRoomCode()));
-onlineJoinBtn?.addEventListener('click',()=>onlineConnectRoom(onlineRoomInput.value));
+onlineCreateBtn?.addEventListener('click',onlineCreateRoom);
+onlineJoinBtn?.addEventListener('click',()=>onlineJoinRoom(onlineRoomInput.value));
 onlineRoomInput?.addEventListener('input',()=>{onlineRoomInput.value=onlineNormalizeRoomCode(onlineRoomInput.value)});
-onlineRoomInput?.addEventListener('keydown',e=>{if(e.key==='Enter')onlineConnectRoom(onlineRoomInput.value)});
+onlineRoomInput?.addEventListener('keydown',e=>{if(e.key==='Enter')onlineJoinRoom(onlineRoomInput.value)});
 onlineCopyBtn?.addEventListener('click',async()=>{
   if(!onlineRoomCode)return;
   try{await navigator.clipboard.writeText(onlineRoomCode);showToast('Код скопирован')}
   catch{showToast(`Код: ${onlineRoomCode}`)}
 });
 onlineReadyBtn?.addEventListener('click',()=>{
-  if(!onlineSide||!onlineSocketOpen()||onlineMatchActive)return;
-  onlineReadyWanted=!onlineReadyWanted;
-  onlineSend('ready',{ready:onlineReadyWanted});
-  renderOnlineLobby();
-  onlineScheduleSync(150);
+  if(!onlineSide||!onlineSocketOpen()||onlineMatchActive||onlinePendingAction)return;
+  onlineQueueAction('ready',{ready:!onlineReady});
 });
 trainingBtn.addEventListener('click',()=>{
   pushSetupHistory();
@@ -5067,9 +4929,8 @@ puzzleExitBtn?.addEventListener('click',()=>{
 });
 restartBtn.addEventListener('click',()=>{
   if(gameMode==='online'){
-    onlineSend('restart',{});
-    onlineDisconnect(true);
-    showSetup();
+    onlineSend('restart',{actionId:onlineMakeActionId()});
+    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
     return;
   }
   if(gameMode==='training'&&phase!=='trainingEdit')restoreTrainingEditor();
@@ -5079,7 +4940,10 @@ restartBtn.addEventListener('click',()=>{
 againBtn.addEventListener('click',()=>{
   modal.classList.remove('show');
   if(gameMode==='training'&&trainingSnapshot)repeatTrainingSituation();
-  else if(gameMode==='online'){onlineSend('restart',{});onlineDisconnect(true);showSetup();}
+  else if(gameMode==='online'){
+    onlineSend('restart',{actionId:onlineMakeActionId()});
+    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
+  }
   else if(gameMode==='puzzle'){
     if(puzzleLastSuccess)startRandomPuzzle();
     else repeatPuzzle();

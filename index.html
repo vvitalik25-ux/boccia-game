@@ -1,11 +1,15 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<!-- ONLINE_EXACT_1V1_V4_PROTOCOL_GUARD -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="boccia-build" content="2026-08-17-cache-safe-1">
+<!-- ONLINE_EXACT_1V1_V5_CACHE_SAFE -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
-<title>Boccia</title>
+<title>Boccia Pocket — Individual</title>
 <style>
 :root{
   --bg:#071010;--panel:rgba(13,27,26,.94);--line:rgba(255,255,255,.13);
@@ -771,6 +775,11 @@ let sideController={red:'p1',blue:'bot'};
 const ONLINE_SERVER='wss://boccia-online.v-vitalik25.workers.dev';
 const ONLINE_HTTP='https://boccia-online.v-vitalik25.workers.dev';
 const ONLINE_PROTOCOL='exact-1v1-v4';
+const APP_BUILD='2026-08-17-cache-safe-1';
+const VERSION_CHECK_URL=`${ONLINE_HTTP}/version`;
+let appVersionCheckPromise=null;
+let appLastVersionCheckAt=0;
+let appVersionReloading=false;
 let onlineSocket=null;
 let onlineRoomCode='';
 let onlinePlayerId=null;
@@ -1783,30 +1792,123 @@ function onlineHandleRoomState(data){
   onlineAckAction(data.ackActionId);
   renderOnlineLobby();
 }
+function appVersionedUrl(build,hard=false){
+  const u=new URL(location.href);
+  u.searchParams.set('v',String(build||APP_BUILD));
+  if(hard)u.searchParams.set('_cb',String(Date.now()));
+  else u.searchParams.delete('_cb');
+  return u;
+}
+function appMarkFreshUrl(){
+  try{
+    const u=appVersionedUrl(APP_BUILD,false);
+    if(u.href!==location.href)history.replaceState(null,'',u.href);
+  }catch{}
+}
+function appForceFreshReload(serverBuild){
+  if(appVersionReloading)return false;
+  appVersionReloading=true;
+
+  const target=String(serverBuild||'latest');
+  const key=`boccia-cache-reload:${target}`;
+  let attempts=0;
+  try{attempts=Number(sessionStorage.getItem(key)||0)||0}catch{}
+
+  // Prevent an endless reload loop if GitHub Pages has not propagated the new file yet.
+  if(attempts>=3){
+    appVersionReloading=false;
+    if(onlineStatusEl){
+      onlineStatusEl.textContent='Новая версия ещё распространяется · повтори через несколько секунд';
+    }
+    showToast('Сайт обновляется · попробуй ещё раз через несколько секунд');
+    return false;
+  }
+
+  try{sessionStorage.setItem(key,String(attempts+1))}catch{}
+
+  const u=appVersionedUrl(target,true);
+  // replace() prevents Back from reopening the stale cached copy.
+  location.replace(u.href);
+  return false;
+}
+async function appCheckServerVersion(force=false){
+  if(appVersionReloading)return false;
+
+  const now=Date.now();
+  if(!force&&appLastVersionCheckAt&&now-appLastVersionCheckAt<30000){
+    return true;
+  }
+  if(appVersionCheckPromise)return appVersionCheckPromise;
+
+  appVersionCheckPromise=(async()=>{
+    try{
+      const r=await fetch(`${VERSION_CHECK_URL}?_=${Date.now()}`,{
+        method:'GET',
+        cache:'no-store',
+        headers:{
+          'Cache-Control':'no-cache',
+          'Pragma':'no-cache'
+        }
+      });
+      if(!r.ok)throw new Error(`version HTTP ${r.status}`);
+
+      const data=await r.json();
+      const serverBuild=String(data?.build||'');
+      const serverProtocol=String(data?.protocol||'');
+
+      appLastVersionCheckAt=Date.now();
+
+      if(serverProtocol&&serverProtocol!==ONLINE_PROTOCOL){
+        return appForceFreshReload(serverBuild||serverProtocol);
+      }
+      if(serverBuild&&serverBuild!==APP_BUILD){
+        return appForceFreshReload(serverBuild);
+      }
+
+      if(serverBuild===APP_BUILD){
+        try{sessionStorage.removeItem(`boccia-cache-reload:${serverBuild}`)}catch{}
+        appMarkFreshUrl();
+      }
+      return true;
+    }catch(err){
+      console.warn('version check failed',err);
+      // Local modes remain usable if the server is temporarily unreachable.
+      return true;
+    }finally{
+      appVersionCheckPromise=null;
+    }
+  })();
+
+  return appVersionCheckPromise;
+}
+function appCheckBuildFromMessage(data){
+  const serverBuild=String(data?.build||'');
+  if(serverBuild&&serverBuild!==APP_BUILD){
+    appForceFreshReload(serverBuild);
+    return false;
+  }
+  return true;
+}
 function onlineProtocolOk(data){
   if(!data?.protocol)return false;
   return data.protocol===ONLINE_PROTOCOL;
 }
-function onlineProtocolMismatch(){
+function onlineProtocolMismatch(data=null){
   onlineClearActionRetry();
   onlineClearSync();
   onlinePendingAction=null;
   onlineMatchActive=false;
-  showToast('Worker не совпадает с игрой');
-  if(onlineStatusEl){
-    onlineStatusEl.textContent='Обнови worker.js · версия сервера не совпадает';
-  }
-  renderOnlineLobby();
+  appForceFreshReload(data?.build||data?.protocol||'latest');
 }
 function onlineHandleMessage(data){
   if(!data||typeof data!=='object')return;
 
-  if(
-    ['joined','room_state','snapshot','action_error','restart'].includes(data.type) &&
-    !onlineProtocolOk(data)
-  ){
-    onlineProtocolMismatch();
-    return;
+  if(['joined','room_state','snapshot','action_error','restart'].includes(data.type)){
+    if(!appCheckBuildFromMessage(data))return;
+    if(!onlineProtocolOk(data)){
+      onlineProtocolMismatch(data);
+      return;
+    }
   }
 
   if(data.type==='joined'){
@@ -1949,7 +2051,7 @@ function onlineConnectRoom(code,reconnecting=false){
 
   ws.onopen=()=>{
     if(ws!==onlineSocket)return;
-    onlineSend('join',{clientKey:onlineClientKey});
+    onlineSend('join',{clientKey:onlineClientKey,build:APP_BUILD,protocol:ONLINE_PROTOCOL});
   };
   ws.onmessage=e=>{
     if(ws!==onlineSocket)return;
@@ -1979,6 +2081,7 @@ function onlineConnectRoom(code,reconnecting=false){
 }
 async function onlineCreateRoom(){
   if(onlineCreatingRoom)return;
+  if(!await appCheckServerVersion(true))return;
   onlineCreatingRoom=true;
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
@@ -1998,7 +2101,9 @@ async function onlineCreateRoom(){
       realism:realisticMode?'1':'0',
       physicsW:String(pc.w),
       physicsH:String(pc.h),
-      physicsR:String(ballR())
+      physicsR:String(ballR()),
+      build:APP_BUILD,
+      protocol:ONLINE_PROTOCOL
     });
     const r=await fetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
       method:'GET',cache:'no-store'
@@ -2020,6 +2125,7 @@ async function onlineCreateRoom(){
   }
 }
 async function onlineJoinRoom(code){
+  if(!await appCheckServerVersion(true))return;
   code=onlineNormalizeRoomCode(code);
   if(code.length<4){showToast('Неверный код комнаты');return}
 
@@ -5266,6 +5372,22 @@ document.addEventListener('contextmenu',e=>e.preventDefault(),{passive:false});
 document.addEventListener('gesturestart',e=>e.preventDefault(),{passive:false});
 
 function loop(){physics();draw();requestAnimationFrame(loop)}
+
+// Automatic freshness check at boot.
+appCheckServerVersion(true);
+
+// Safari/iOS can restore a whole old page from BFCache without networking.
+window.addEventListener('pageshow',e=>{
+  if(e.persisted)appCheckServerVersion(true);
+});
+
+// Also refresh-check an old tab when the player returns to it.
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&Date.now()-appLastVersionCheckAt>60000){
+    appCheckServerVersion(true);
+  }
+});
+
 resize();renderFormatButtons();showSetup();loop();
 })();
 </script>

@@ -1,0 +1,19 @@
+[
+  "state.js",
+  "configuration.js",
+  "court.js",
+  "inventory.js",
+  "online.js",
+  "setup.js",
+  "training.js",
+  "puzzles.js",
+  "match-setup.js",
+  "controls.js",
+  "bot-simulation.js",
+  "bot-strategy.js",
+  "rules.js",
+  "physics.js",
+  "rendering.js",
+  "input.js",
+  "bootstrap.js"
+]

@@ -4,7 +4,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="boccia-build" content="2026-08-17-cache-safe-1">
+<meta name="boccia-build" content="2026-09-06-online-stability-1">
 <!-- ONLINE_EXACT_1V1_V5_CACHE_SAFE -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
@@ -21,6 +21,9 @@
   -webkit-touch-callout:none;
   -webkit-user-select:none;
   user-select:none;
+}
+input,textarea,[contenteditable="true"]{
+  -webkit-user-select:text;user-select:text;-webkit-touch-callout:default;touch-action:manipulation;
 }
 html,body{
   margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);
@@ -523,7 +526,7 @@ button:active{transform:scale(.97)}button:disabled{opacity:.28}
       <div class="onlineConnect" id="onlineConnect">
         <button class="onlineCreate" id="onlineCreateBtn">Создать комнату</button>
         <div class="onlineJoinRow">
-          <input id="onlineRoomInput" maxlength="8" autocomplete="off" autocapitalize="characters" placeholder="КОД" aria-label="Код комнаты">
+          <input id="onlineRoomInput" maxlength="64" autocomplete="off" autocapitalize="characters" placeholder="КОД" aria-label="Код комнаты">
           <button id="onlineJoinBtn">Войти</button>
         </div>
       </div>
@@ -775,12 +778,19 @@ let sideController={red:'p1',blue:'bot'};
 const ONLINE_SERVER='wss://boccia-online.v-vitalik25.workers.dev';
 const ONLINE_HTTP='https://boccia-online.v-vitalik25.workers.dev';
 const ONLINE_PROTOCOL='exact-1v1-v4';
-const APP_BUILD='2026-08-17-cache-safe-1';
+const APP_BUILD='2026-09-06-online-stability-1';
 const VERSION_CHECK_URL=`${ONLINE_HTTP}/version`;
 let appVersionCheckPromise=null;
 let appLastVersionCheckAt=0;
 let appVersionReloading=false;
 let onlineSocket=null;
+let onlineConnectionStatus='';
+let onlineWatchdogTimer=null;
+let onlineLastResponseAt=0;
+let onlineReconnectAttempts=0;
+let onlineMatchId=null;
+let onlinePhysicsProfile=null;
+let onlineLatestSnapshot=null;
 let onlineRoomCode='';
 let onlinePlayerId=null;
 let onlineSide=null;
@@ -1043,7 +1053,10 @@ function court(){
 }
 function mx(m){const c=court();return c.x+c.w*(m/6)}
 function my(m){const c=court();return c.y+c.h*(m/12.5)}
-function ballR(){return Math.max(7.8,Math.min(12.5,court().w*.032))}
+function ballR(){
+  if(gameMode==='online'&&onlinePhysicsProfile)return court().w*onlinePhysicsProfile.r/onlinePhysicsProfile.w;
+  return Math.max(7.8,Math.min(12.5,court().w*.032));
+}
 function throwingY(){return my(10)}
 function boxCenter(boxNo){
   const c=court(),bw=c.w/6;
@@ -1123,7 +1136,9 @@ function rescaleBallGeometry(o,oldC,newC){
   o.vx=(o.vx||0)*scale;
   o.vy=(o.vy||0)*scale;
   o.vz=(o.vz||0)*scale;
-  o.r=Math.max(7.8,Math.min(12.5,newC.w*.032));
+  o.r=gameMode==='online'&&onlinePhysicsProfile
+    ?newC.w*onlinePhysicsProfile.r/onlinePhysicsProfile.w
+    :Math.max(7.8,Math.min(12.5,newC.w*.032));
   if(o.realism?.startSpeed)o.realism.startSpeed*=scale;
 }
 function rescaleSnapshotGeometry(s,oldC,newC){
@@ -1316,7 +1331,7 @@ function currentSide(){
 function humanTurn(){
   const s=currentSide();
   if(gameMode==='online'){
-    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlinePendingAction&&!onlineAnimating&&!onlineTransitioning;
+    return !!s&&s===onlineSide&&!preStartPause&&onlineMatchActive&&onlineSocketOpen()&&!onlineConnectionStatus&&!onlinePendingAction&&!onlineAnimating&&!onlineTransitioning;
   }
   return !!s && !isBotSide(s) && !preStartPause;
 }
@@ -1354,7 +1369,8 @@ function onlineClone(value){
   return value==null?value:JSON.parse(JSON.stringify(value));
 }
 function onlineNormalizeRoomCode(value){
-  return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,8);
+  const lookalikes={'А':'A','В':'B','С':'C','Е':'E','Н':'H','К':'K','М':'M','О':'O','Р':'P','Т':'T','Х':'X','У':'Y'};
+  return String(value||'').toUpperCase().replace(/[АВСЕНКМОРТХУ]/g,c=>lookalikes[c]).replace(/[^A-Z0-9]/g,'').slice(0,8);
 }
 function onlineSocketOpen(){
   return !!onlineSocket&&onlineSocket.readyState===WebSocket.OPEN;
@@ -1362,11 +1378,40 @@ function onlineSocketOpen(){
 function onlineSend(type,payload={}){
   if(!onlineSocketOpen())return false;
   try{
-    onlineSocket.send(JSON.stringify({type,...payload}));
+    onlineSocket.send(JSON.stringify({type,...(type==='restart'?{matchId:onlineMatchId}:{}),...payload}));
     return true;
   }catch{
     return false;
   }
+}
+async function onlineFetch(url,options={}){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const response=await fetch(url,{...options,signal:controller.signal});
+    // Consume the body under the same deadline; response.json() then reads a local copy.
+    const body=await response.text();
+    return {ok:response.ok,status:response.status,json:async()=>JSON.parse(body)};
+  }finally{clearTimeout(timer)}
+}
+function onlineClearWatchdog(){
+  clearTimeout(onlineWatchdogTimer);onlineWatchdogTimer=null;
+}
+function onlineWatchConnection(ws){
+  onlineClearWatchdog();
+  onlineWatchdogTimer=setTimeout(()=>{
+    if(ws!==onlineSocket)return;
+    if(Date.now()-onlineLastResponseAt>=12000){
+      onlineConnectionStatus='Связь потеряна · переподключаемся…';
+      onlineConnectRoom(onlineRoomCode,true);
+      return;
+    }
+    onlineWatchConnection(ws);
+  },2000);
+}
+function onlineResetPlayback(){
+  onlineClearAnimation();onlineClearTransition();onlineClearEventTimers();
+  onlineDeferredSnapshot=null;onlineLatestSnapshot=null;
 }
 function onlineMakeActionId(){
   const p=(onlineClientKey||'c').replace(/[^a-zA-Z0-9]/g,'').slice(-8);
@@ -1400,7 +1445,7 @@ function onlineSendPendingAction(){
     if(!onlinePendingAction)return;
     onlineSend('sync',{knownRevision:onlineRevision});
     onlineSendPendingAction();
-  },500);
+  },Math.min(4000,500*Math.pow(2,onlinePendingAction.retries++)));
 }
 function onlineQueueAction(type,payload={}){
   if(!onlineSocketOpen()||onlinePendingAction)return false;
@@ -1408,7 +1453,8 @@ function onlineQueueAction(type,payload={}){
   onlinePendingAction={
     type,
     actionId,
-    payload:{...payload,actionId}
+    retries:0,
+    payload:{...payload,actionId,expectedRevision:onlineRevision,matchId:onlineMatchId}
   };
   onlineSendPendingAction();
   updateUI();
@@ -1504,7 +1550,7 @@ function onlineEventMessage(ev){
 function onlineShowAnimationEventsAtFrame(frameIndex){
   for(const ev of onlineAnimationEvents){
     if(ev._shown)continue;
-    if(Number(ev.frame)!==frameIndex)continue;
+    if(!Number.isFinite(Number(ev.frame))||Number(ev.frame)>frameIndex)continue;
     ev._shown=true;
     const msg=onlineEventMessage(ev);
     if(msg)showToast(msg);
@@ -1591,50 +1637,36 @@ function onlinePlayAnimation(animation,finalState,revision,events=[],transition=
 
   onlineClearAnimation();
   onlineClearTransition();
-  onlineClearSync();
+  // Keep recovery polling alive during long animations for the connection watchdog.
+  onlineScheduleSync(1000);
 
   onlineAnimating=true;
   onlineAnimationRevision=Number(revision)||0;
   onlineAnimationMeta=objects;
   onlineAnimationEvents=(Array.isArray(events)?events:[]).map(ev=>({...ev,_shown:false}));
 
-  // Local 1x1 executes exactly one physics() step per requestAnimationFrame.
-  // The server already calculated those exact steps; here we only replay one
-  // saved physics step per display refresh.
-  let i=0;
-  const step=()=>{
+  // Server frames represent a fixed 60 Hz simulation, independent of display refresh.
+  onlineLatestSnapshot={state:finalState,revision};
+  const startedAt=performance.now();
+  let lastFrame=-1;
+  const step=now=>{
     if(!onlineAnimating)return;
-
-    if(i>=frames.length){
-      onlineApplyPostAnimation(
-        finalState,
-        revision,
-        onlineAnimationEvents,
-        transition
-      );
+    const elapsed=Math.max(0,now-startedAt);
+    const frame=Math.min(frames.length-1,Math.floor(elapsed*60/1000));
+    if(frame!==lastFrame){
+      onlineApplyAnimationFrame(frames[frame],objects);
+      onlineShowAnimationEventsAtFrame(frame);
+      lastFrame=frame;
+    }
+    if(elapsed>=frames.length*1000/60){
+      onlineApplyPostAnimation(finalState,revision,onlineAnimationEvents,transition);
       return;
     }
-
-    onlineApplyAnimationFrame(frames[i],objects);
-    onlineShowAnimationEventsAtFrame(i);
-    i++;
-
-    if(i>=frames.length){
-      // Local 1×1 resolves the stopped shot before draw() in this same frame.
-      onlineApplyPostAnimation(
-        finalState,
-        revision,
-        onlineAnimationEvents,
-        transition
-      );
-      return;
-    }
-
     onlineAnimationTimer=requestAnimationFrame(step);
   };
-
   onlineAnimationTimer=requestAnimationFrame(step);
 }
+
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
   const hasRoom=!!onlineRoomCode;
@@ -1655,7 +1687,9 @@ function renderOnlineLobby(){
   onlineRedDot.classList.toggle('on',!!red?.connected);
   onlineBlueDot.classList.toggle('on',!!blue?.connected);
 
-  if(onlineCreatingRoom){
+  if(onlineConnectionStatus){
+    onlineStatusEl.textContent=onlineConnectionStatus;
+  }else if(onlineCreatingRoom){
     onlineStatusEl.textContent='Сервер создаёт комнату…';
   }else if(onlineMatchActive){
     onlineStatusEl.textContent=onlineAnimating
@@ -1700,6 +1734,9 @@ function onlineApplyState(s,revision=0){
 
   const keepSide=onlineSide;
   onlineRevision=incoming;
+  onlineMatchId=s.matchId||onlineMatchId;
+  onlinePhysicsProfile=s.physicsProfile||onlinePhysicsProfile;
+  if(s.endNo!==endNo||!!s.tieBreak!==tieBreak){aimAngle=0;aimPower=.50;}
 
   matchFormat=s.matchFormat||'individual';
   fieldOrientation=s.fieldOrientation==='horizontal'?'horizontal':'vertical';
@@ -1754,6 +1791,7 @@ function onlineApplyState(s,revision=0){
   return true;
 }
 function onlineEnterMatch(state,revision){
+  const resuming=onlineMatchActive&&(!state.matchId||state.matchId===onlineMatchId);
   onlineMatchActive=true;
   onlineGameStartSent=true;
   gameMode='online';
@@ -1766,6 +1804,7 @@ function onlineEnterMatch(state,revision){
   relayoutSoon();
   updateUI();
 
+  if(resuming)return;
   aimAngle=0;
   aimPower=.50;
   updateUI();
@@ -1842,13 +1881,9 @@ async function appCheckServerVersion(force=false){
 
   appVersionCheckPromise=(async()=>{
     try{
-      const r=await fetch(`${VERSION_CHECK_URL}?_=${Date.now()}`,{
+      const r=await onlineFetch(`${VERSION_CHECK_URL}?_=${Date.now()}`,{
         method:'GET',
-        cache:'no-store',
-        headers:{
-          'Cache-Control':'no-cache',
-          'Pragma':'no-cache'
-        }
+        cache:'no-store'
       });
       if(!r.ok)throw new Error(`version HTTP ${r.status}`);
 
@@ -1912,6 +1947,8 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='joined'){
+    onlineConnectionStatus='';
+    onlineReconnectAttempts=0;
     onlinePlayerId=data.playerId;
     onlineSide=data.side;
     onlineReady=!!data.ready;
@@ -1945,7 +1982,10 @@ function onlineHandleMessage(data){
 
       if(!onlineMatchActive){
         onlineEnterMatch(data.state,rev);
+      }else if(rev<onlineRevision||((onlineAnimating||onlineTransitioning)&&rev<onlineAnimationRevision)){
+        return;
       }else if(data.animation?.frames?.length){
+        if(rev<=Math.max(onlineRevision,onlineAnimationRevision))return;
         onlinePlayAnimation(
           data.animation,
           data.state,
@@ -1961,7 +2001,8 @@ function onlineHandleMessage(data){
         }
       }else{
         onlineApplyState(data.state,rev);
-        if(data.events?.length)onlineShowEvents(data.events);
+        if(data.transition)onlineApplyPostAnimation(data.state,rev,data.events||[],data.transition);
+        else if(data.events?.length)onlineShowResolutionEvents(data.events);
       }
     }
     renderOnlineLobby();
@@ -1969,6 +2010,7 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='action_error'){
+    onlineResetPlayback();
     onlineAckAction(data.ackActionId);
     if(data.state){
       if(!onlineMatchActive)onlineEnterMatch(data.state,data.revision||0);
@@ -1979,14 +2021,19 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='room_full'){
-    showToast('Комната занята');
+    onlineDisconnect(true);
+    showToast('В комнате уже два игрока. Проверь код или создай новую комнату.');
     onlineStatusEl.textContent='В комнате уже два игрока';
     renderOnlineLobby();
     return;
   }
 
   if(data.type==='restart'){
-    onlineAckAction(data.ackActionId);
+    onlineResetPlayback();
+    onlineClearActionRetry();
+    onlinePendingAction=null;
+    onlineMatchId=null;
+    onlineScheduleSync(250);
     onlineMatchActive=false;
     onlineRevision=0;
     onlineReady=false;
@@ -2004,13 +2051,17 @@ function onlineScheduleReconnect(){
     onlineReconnectTimer=null;
     if(onlineManualDisconnect||onlineSocketOpen()||!onlineRoomCode)return;
     onlineConnectRoom(onlineRoomCode,true);
-  },900);
+  },Math.min(10000,900*Math.pow(2,onlineReconnectAttempts++))+Math.random()*250);
 }
 function onlineConnectRoom(code,reconnecting=false){
   code=onlineNormalizeRoomCode(code);
   if(code.length<4){showToast('Неверный код комнаты');return}
 
   onlineRoomCode=code;
+  onlineManualDisconnect=false;
+  onlineClearWatchdog();
+  onlineClearReconnect();
+  onlineResetPlayback();
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
 
@@ -2025,6 +2076,8 @@ function onlineConnectRoom(code,reconnecting=false){
     onlineReady=false;
     onlineMatchActive=false;
     onlineRevision=0;
+    onlineMatchId=null;
+    onlineReconnectAttempts=0;
   }
 
   const previous=onlineSocket;
@@ -2039,14 +2092,16 @@ function onlineConnectRoom(code,reconnecting=false){
   try{
     ws=new WebSocket(`${ONLINE_SERVER}/room/${encodeURIComponent(code)}`);
   }catch{
-    onlineStatusEl.textContent='Не удалось открыть соединение';
+    onlineConnectionStatus='Не удалось открыть соединение';
     renderOnlineLobby();
     onlineScheduleReconnect();
     return;
   }
 
   onlineSocket=ws;
-  onlineStatusEl.textContent=reconnecting?'Переподключение…':'Подключение…';
+  onlineConnectionStatus=reconnecting?'Переподключение…':'Подключение…';
+  onlineLastResponseAt=Date.now();
+  onlineWatchConnection(ws);
   renderOnlineLobby();
 
   ws.onopen=()=>{
@@ -2055,23 +2110,33 @@ function onlineConnectRoom(code,reconnecting=false){
   };
   ws.onmessage=e=>{
     if(ws!==onlineSocket)return;
+    onlineLastResponseAt=Date.now();
     try{onlineHandleMessage(JSON.parse(e.data))}
     catch(err){console.warn('online message',err)}
   };
   ws.onerror=()=>{
     if(ws!==onlineSocket)return;
-    onlineStatusEl.textContent='Ошибка соединения';
+    onlineConnectionStatus='Ошибка соединения · пробуем восстановить…';
     renderOnlineLobby();
   };
-  ws.onclose=()=>{
+  ws.onclose=e=>{
     if(ws!==onlineSocket)return;
     onlineSocket=null;
+    onlineClearWatchdog();
+    if(e.code===4001){
+      onlineDisconnect(true);
+      showToast('Игра открыта в другой вкладке');
+      showSetupScreen('online');
+      setupOverlay.classList.add('show');
+      return;
+    }
     onlineClearActionRetry();
     onlineClearSync();
     onlineClearAnimation();
     onlineClearTransition();
     onlineDeferredSnapshot=null;
     if(!onlineManualDisconnect&&onlineRoomCode){
+      onlineConnectionStatus='Связь потеряна · переподключаемся…';
       if(onlineMatchActive)showToast('Связь потеряна · переподключаемся');
       else onlineStatusEl.textContent='Связь потеряна · переподключаемся…';
       renderOnlineLobby();
@@ -2083,6 +2148,7 @@ async function onlineCreateRoom(){
   if(onlineCreatingRoom)return;
   if(!await appCheckServerVersion(true))return;
   onlineCreatingRoom=true;
+  onlineConnectionStatus='';
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
   onlineRoomCode='';
@@ -2105,7 +2171,7 @@ async function onlineCreateRoom(){
       build:APP_BUILD,
       protocol:ONLINE_PROTOCOL
     });
-    const r=await fetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
+    const r=await onlineFetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
       method:'GET',cache:'no-store'
     });
     if(!r.ok)throw new Error(`HTTP ${r.status}`);
@@ -2117,7 +2183,7 @@ async function onlineCreateRoom(){
     console.warn(err);
     onlineRoomCode='';
     showToast('Не удалось создать комнату');
-    onlineStatusEl.textContent='Сервер недоступен';
+    onlineConnectionStatus='Сервер недоступен · попробуй ещё раз';
     renderOnlineLobby();
   }finally{
     onlineCreatingRoom=false;
@@ -2130,7 +2196,7 @@ async function onlineJoinRoom(code){
   if(code.length<4){showToast('Неверный код комнаты');return}
 
   try{
-    const r=await fetch(`${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,{
+    const r=await onlineFetch(`${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,{
       method:'GET',cache:'no-store'
     });
     if(r.status===404){showToast('Комната не найдена');return}
@@ -2143,6 +2209,11 @@ async function onlineJoinRoom(code){
 }
 function onlineDisconnect(clearRoom=true){
   onlineManualDisconnect=true;
+  onlineClearWatchdog();
+  onlineConnectionStatus='';
+  onlineMatchId=null;
+  onlinePhysicsProfile=null;
+  onlineLatestSnapshot=null;
   onlineClearActionRetry();
   onlineClearSync();
   onlineClearReconnect();
@@ -3367,7 +3438,9 @@ function updateUI(){
       ?`ЗАДАЧА · ${puzzle.difficulty}`
       :(tieBreak?'ТАЙ-БРЕЙК':`${formatConfig().label} · энд ${endNo} / ${totalEnds}`);
 
-  if(gameMode==='online'&&onlineTransitioning){
+  if(gameMode==='online'&&onlineConnectionStatus){
+    statusEl.textContent=onlineConnectionStatus;
+  }else if(gameMode==='online'&&onlineTransitioning){
     statusEl.textContent='Подсчёт очков';
   }else if(gameMode==='online'&&onlineAnimating){
     statusEl.textContent='Мяч катится…';
@@ -5270,7 +5343,8 @@ localBtn.addEventListener('click',()=>beginColourToss('local'));
 onlineBtn?.addEventListener('click',onlineOpenSetup);
 onlineCreateBtn?.addEventListener('click',onlineCreateRoom);
 onlineJoinBtn?.addEventListener('click',()=>onlineJoinRoom(onlineRoomInput.value));
-onlineRoomInput?.addEventListener('input',()=>{onlineRoomInput.value=onlineNormalizeRoomCode(onlineRoomInput.value)});
+onlineRoomInput?.addEventListener('input',e=>{if(!e.isComposing)onlineRoomInput.value=onlineNormalizeRoomCode(onlineRoomInput.value)});
+onlineRoomInput?.addEventListener('compositionend',()=>{onlineRoomInput.value=onlineNormalizeRoomCode(onlineRoomInput.value)});
 onlineRoomInput?.addEventListener('keydown',e=>{if(e.key==='Enter')onlineJoinRoom(onlineRoomInput.value)});
 onlineCopyBtn?.addEventListener('click',async()=>{
   if(!onlineRoomCode)return;
@@ -5366,10 +5440,10 @@ againBtn.addEventListener('click',()=>{
 
 
 // Prevent text/object selection, image dragging, long-press callouts and context menus.
-document.addEventListener('selectstart',e=>e.preventDefault(),{passive:false});
-document.addEventListener('dragstart',e=>e.preventDefault(),{passive:false});
-document.addEventListener('contextmenu',e=>e.preventDefault(),{passive:false});
-document.addEventListener('gesturestart',e=>e.preventDefault(),{passive:false});
+document.addEventListener('selectstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
+document.addEventListener('dragstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
+document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
+document.addEventListener('gesturestart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 
 function loop(){physics();draw();requestAnimationFrame(loop)}
 
@@ -5383,6 +5457,14 @@ window.addEventListener('pageshow',e=>{
 
 // Also refresh-check an old tab when the player returns to it.
 document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&gameMode==='online'&&onlineRoomCode){
+    const latest=onlineDeferredSnapshot||onlineLatestSnapshot;
+    onlineResetPlayback();
+    if(latest)onlineApplyState(latest.state,latest.revision);
+    if(onlineSocketOpen()&&Date.now()-onlineLastResponseAt<12000){
+      onlineSend('sync',{knownRevision:onlineRevision});onlineScheduleSync(250);
+    }else onlineConnectRoom(onlineRoomCode,true);
+  }
   if(document.visibilityState==='visible'&&Date.now()-appLastVersionCheckAt>60000){
     appCheckServerVersion(true);
   }

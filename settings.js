@@ -8,7 +8,7 @@ let joystickVector={x:0,y:0};
 const heldAimKeys=new Set(),heldAimPointers=new Map();
 try{
   const saved=JSON.parse(localStorage.getItem('boccia-settings')||'{}');
-  if(['joystick','buttons','keyboard'].includes(saved.controlMode))controlMode=saved.controlMode;
+  if(['joystick','buttons','keyboard','sliders'].includes(saved.controlMode))controlMode=saved.controlMode;
   if(['vertical','horizontal'].includes(saved.fieldOrientation))fieldOrientation=saved.fieldOrientation;
   if(BOT_LEVELS[saved.botDifficulty])botDifficulty=saved.botDifficulty;
 }catch{}
@@ -24,6 +24,9 @@ function stopAimInput(){
   cancelAnimationFrame(aimFrame);aimFrame=0;aimLastTime=0;
 }
 function renderAimControls(){
+  document.getElementById('aimPanel').classList.toggle('screenButtons',controlMode==='buttons');
+  document.getElementById('legacySliders').hidden=controlMode!=='sliders';
+  document.getElementById('alternativeAim').hidden=controlMode==='sliders';
   document.getElementById('joystickControl').hidden=controlMode!=='joystick';
   document.getElementById('buttonControl').hidden=controlMode!=='buttons';
   document.getElementById('keyboardControl').hidden=controlMode!=='keyboard';
@@ -105,7 +108,7 @@ settingsButton.addEventListener('click',()=>{
   settingsDialog.showModal();renderAimControls();
 });
 document.getElementById('settingsCloseBtn').addEventListener('click',()=>settingsDialog.close());
-settingsDialog.addEventListener('close',()=>{resetControls();saveSettings();renderAimControls();settingsButton.focus();});
+settingsDialog.addEventListener('close',()=>{resetControls();saveSettings();renderAimControls();resize();relayoutSoon();settingsButton.focus();});
 document.querySelectorAll('[data-control-mode]').forEach(button=>button.addEventListener('click',()=>{
   resetControls();controlMode=button.dataset.controlMode;saveSettings();
   document.querySelectorAll('[data-control-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
@@ -115,7 +118,7 @@ for(const button of [fieldVerticalBtn,fieldHorizontalBtn,aiEasyBtn,aiMediumBtn,a
 
 // Desktop shortcuts work independently of the selected aiming device.
 function handleGameShortcut(e){
-  if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input,textarea,select,[contenteditable]'))return;
+  if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))return;
   if(e.code==='Escape'){
     e.preventDefault();if(e.repeat)return;resetControls();
     if(settingsDialog.open){settingsDialog.close();return;}
@@ -135,5 +138,5 @@ function handleGameShortcut(e){
 }
 window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
-  if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input,textarea,select,[contenteditable]'))e.preventDefault();
+  if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });

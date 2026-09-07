@@ -10,7 +10,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
 <title>Boccia Pocket — Individual</title>
-<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-2">
+<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-4">
 </head>
 <body>
 <button id="settingsBtn" class="settingsButton" aria-haspopup="dialog">⚙ Настройки</button>
@@ -38,6 +38,7 @@
 <p class="setupSmall">Сложность действует только на компьютерного соперника.</p>
 <div class="orientationCard"><div class="orientationHead">Управление прицелом</div>
 <div class="controlOptions">
+<button data-control-mode="sliders">Ползунки</button>
 <button data-control-mode="joystick">Джойстик</button>
 <button data-control-mode="buttons">Стрелки на экране</button>
 <button data-control-mode="keyboard">WASD / стрелки клавиатуры</button>
@@ -266,7 +267,7 @@
       <div id="alternativeAim">
 <div id="joystickControl" class="joystick" role="group" aria-label="Джойстик прицела"><span id="joystickKnob">✥</span></div>
 <div id="buttonControl" class="directionButtons" hidden>
-<button data-aim="left" aria-label="Прицел влево">←</button><button data-aim="up" aria-label="Увеличить силу">↑</button><button data-aim="down" aria-label="Уменьшить силу">↓</button><button data-aim="right" aria-label="Прицел вправо">→</button>
+<button data-aim="left" aria-label="Прицел влево" title="Направление влево">←</button><button data-aim="up" aria-label="Увеличить силу" title="Увеличить силу">↑</button><button data-aim="down" aria-label="Уменьшить силу" title="Уменьшить силу">↓</button><button data-aim="right" aria-label="Прицел вправо" title="Направление вправо">→</button>
 </div>
 <div id="keyboardControl" hidden>WASD / ↑↓←→ — прицел<br>Пробел — бросок<br>Esc — назад · K — настройки</div>
 
@@ -289,6 +290,6 @@
 
 </div>
 
-<script src="game.js?v=2026-09-07-settings-2"></script>
+<script src="game.js?v=2026-09-07-settings-4"></script>
 </body>
 </html>

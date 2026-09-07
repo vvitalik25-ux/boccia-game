@@ -452,7 +452,7 @@ button:active{transform:scale(.97)}button:disabled{opacity:.28}
 .hidden{display:none!important}
 
 /* Settings stay reachable from the menu and the court. */
-[hidden],#legacySliders{display:none!important}
+[hidden]{display:none!important}
 .settingsButton{position:fixed;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:1000;min-width:150px;min-height:48px;padding:12px 18px;font-size:16px;font-weight:800;background:#dfff68;color:#142019;border:1px solid #eaff9e;border-radius:14px;box-shadow:0 4px 16px #0008;opacity:1;isolation:isolate}
 .setupCard{margin-top:62px}
 #settingsDialog{width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid #45615b;border-radius:20px;background:#101f1e;color:#eef5ef;padding:18px}
@@ -474,3 +474,19 @@ button:active{transform:scale(.97)}button:disabled{opacity:.28}
 
 .controlOptions button{min-height:44px;padding:10px}
 @media(min-width:900px) and (min-height:600px){.compactAimGrid{grid-template-columns:minmax(0,1fr) 120px minmax(0,.92fr)}.throwBtn{font-size:15px}#keyboardControl{font-size:13px}}
+
+/* A familiar directional pad, with larger touch targets. */
+.aimPanel.screenButtons{flex-basis:116px;height:116px;min-height:116px;max-height:116px}
+.aimPanel.screenButtons.multiPlayerFormat{flex-basis:184px;height:184px;min-height:184px;max-height:184px}
+.screenButtons .compactAimGrid,.screenButtons .throwSlot,.screenButtons #alternativeAim{height:104px}
+.screenButtons .aimRight{align-self:center}
+.directionButtons{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:44px 44px;gap:5px;max-width:200px}
+.directionButtons button{min-height:44px;height:44px;font-size:27px;border-radius:12px;background:#28433c;border:1px solid #6c9381;color:#f3ffe5;box-shadow:0 2px 0 #071410}
+.directionButtons [data-aim=up]{grid-column:2;grid-row:1}
+.directionButtons [data-aim=left]{grid-column:1;grid-row:2}
+.directionButtons [data-aim=down]{grid-column:2;grid-row:2}
+.directionButtons [data-aim=right]{grid-column:3;grid-row:2}
+.directionButtons button:active{background:#dfff68;color:#142019;transform:translateY(2px);box-shadow:none}
+@media(min-width:900px) and (min-height:600px){.throwBtn{width:100%!important;min-width:0!important}}
+.screenButtons .throwBtn{height:104px!important}
+.directionButtons::before{content:"Прицел";grid-column:1;grid-row:1}.directionButtons::after{content:"Сила";grid-column:3;grid-row:1}.directionButtons::before,.directionButtons::after{align-self:center;text-align:center;font-size:10px;color:#b8cbbf}

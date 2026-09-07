@@ -1,4 +1,30 @@
-function loop(){physics();draw();requestAnimationFrame(loop)}
+const PHYSICS_STEP_MS=1000/60;
+const MAX_PHYSICS_STEPS_PER_FRAME=6;
+let loopLastTime=0;
+let loopAccumulator=0;
+
+function loop(now){
+  const current=Number.isFinite(now)?now:performance.now();
+  if(!loopLastTime)loopLastTime=current;
+
+  const elapsed=Math.max(0,Math.min(100,current-loopLastTime));
+  loopLastTime=current;
+  loopAccumulator+=elapsed;
+
+  let steps=0;
+  while(loopAccumulator>=PHYSICS_STEP_MS&&steps<MAX_PHYSICS_STEPS_PER_FRAME){
+    physics();
+    loopAccumulator-=PHYSICS_STEP_MS;
+    steps++;
+  }
+
+  if(steps===MAX_PHYSICS_STEPS_PER_FRAME&&loopAccumulator>=PHYSICS_STEP_MS){
+    loopAccumulator=0;
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
 
 // Automatic freshness check at boot.
 appCheckServerVersion(true);

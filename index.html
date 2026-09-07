@@ -10,7 +10,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
 <title>Boccia Pocket — Individual</title>
-<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-1">
+<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-2">
 </head>
 <body>
 <button id="settingsBtn" class="settingsButton" aria-haspopup="dialog">⚙ Настройки</button>
@@ -41,7 +41,7 @@
 <button data-control-mode="joystick">Джойстик</button>
 <button data-control-mode="buttons">Стрелки на экране</button>
 <button data-control-mode="keyboard">WASD / стрелки клавиатуры</button>
-</div><p class="setupSmall">← → направление · ↑ ↓ сила. Удерживай для плавного изменения. Бросок — отдельной кнопкой.</p></div>
+</div><p class="setupSmall">← → направление · ↑ ↓ сила. Удерживай для плавного изменения. Пробел — бросок · Esc — назад · K — настройки.</p></div>
 </dialog>
 <div class="setupOverlay show" id="setupOverlay">
   <button class="setupBack hidden" id="setupBackBtn">← Назад</button>
@@ -268,8 +268,8 @@
 <div id="buttonControl" class="directionButtons" hidden>
 <button data-aim="left" aria-label="Прицел влево">←</button><button data-aim="up" aria-label="Увеличить силу">↑</button><button data-aim="down" aria-label="Уменьшить силу">↓</button><button data-aim="right" aria-label="Прицел вправо">→</button>
 </div>
-<div id="keyboardControl" hidden>W / ↑ сила +<br>A / ← · D / →<br>S / ↓ сила −</div>
-<output id="aimValue" aria-label="Направление и сила"></output>
+<div id="keyboardControl" hidden>WASD / ↑↓←→ — прицел<br>Пробел — бросок<br>Esc — назад · K — настройки</div>
+
 </div>
 <div class="throwSlot">
         <button class="throwBtn" id="throwBtn">БРОСОК</button>
@@ -289,6 +289,6 @@
 
 </div>
 
-<script src="game.js?v=2026-09-07-settings-1"></script>
+<script src="game.js?v=2026-09-07-settings-2"></script>
 </body>
 </html>

@@ -3,8 +3,7 @@ const settingsDialog=document.getElementById('settingsDialog');
 const settingsButton=document.getElementById('settingsBtn');
 const joystickControl=document.getElementById('joystickControl');
 const joystickKnob=document.getElementById('joystickKnob');
-const aimValue=document.getElementById('aimValue');
-let controlMode='joystick',aimFrame=0,aimLastTime=0,joystickPointer=null;
+let controlMode=window.matchMedia?.('(pointer:fine)').matches?'keyboard':'joystick',aimFrame=0,aimLastTime=0,joystickPointer=null;
 let joystickVector={x:0,y:0};
 const heldAimKeys=new Set(),heldAimPointers=new Map();
 try{
@@ -28,7 +27,6 @@ function renderAimControls(){
   document.getElementById('joystickControl').hidden=controlMode!=='joystick';
   document.getElementById('buttonControl').hidden=controlMode!=='buttons';
   document.getElementById('keyboardControl').hidden=controlMode!=='keyboard';
-  aimValue.textContent=`${Math.round(aimAngle)}° · ${Math.round(aimPower*100)}%`;
   document.querySelectorAll('[data-aim]').forEach(b=>b.disabled=!canAdjustAim());
   joystickControl.setAttribute('aria-disabled',String(!canAdjustAim()));
   if(!canAdjustAim())stopAimInput();
@@ -114,3 +112,28 @@ document.querySelectorAll('[data-control-mode]').forEach(button=>button.addEvent
   renderAimControls();
 }));
 for(const button of [fieldVerticalBtn,fieldHorizontalBtn,aiEasyBtn,aiMediumBtn,aiHardBtn,aiExpertBtn])button.addEventListener('click',saveSettings);
+
+// Desktop shortcuts work independently of the selected aiming device.
+function handleGameShortcut(e){
+  if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input,textarea,select,[contenteditable]'))return;
+  if(e.code==='Escape'){
+    e.preventDefault();if(e.repeat)return;resetControls();
+    if(settingsDialog.open){settingsDialog.close();return;}
+    if(setupOverlay.classList.contains('show')){setupGoBack();return;}
+    modal.classList.remove('show');startNoticeEl.classList.remove('show');preStartPause=false;
+    if(gameMode==='training'&&phase!=='trainingEdit')restoreTrainingEditor();
+    else showSetup();
+    return;
+  }
+  if(e.code==='KeyK'&&!e.repeat&&!settingsDialog.open){e.preventDefault();settingsButton.click();return;}
+  if(e.code!=='Space'&&e.code!=='Enter')return;
+  if(settingsDialog.open||setupOverlay.classList.contains('show')||modal.classList.contains('show'))return;
+  // Suppress native activation of a previously focused menu or action button.
+  e.preventDefault();if(e.repeat)return;
+  if(preStartPause){finishPreStartPause();return;}
+  if(e.code==='Space'&&canAdjustAim()){resetControls();launchHuman();}
+}
+window.addEventListener('keydown',handleGameShortcut);
+window.addEventListener('keyup',e=>{
+  if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input,textarea,select,[contenteditable]'))e.preventDefault();
+});

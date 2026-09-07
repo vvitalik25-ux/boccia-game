@@ -15,3 +15,16 @@ c.turn=false;el('joystickControl').fire('pointerdown',{pointerId:5,clientX:53,cl
 c.turn=true;c.aimAngle=58;c.aimPower=1;modes[1].fire('click');buttons[3].fire('click',{detail:0});buttons[1].fire('click',{detail:0});assert.equal(c.aimAngle,58);assert.equal(c.aimPower,1);assert.equal(saved.controlMode,'buttons');
 c.gameMode='online';c.onlineRoomCode='ABCDE';el('settingsBtn').fire('click');assert(c.fieldVerticalBtn.disabled);assert(c.fieldHorizontalBtn.disabled);
 console.log('PASS: buttons, hold/release, WASD, arrows, blur, text-input exclusion, modal blocking, joystick, cancel, turn lock, limits, persistence, online orientation lock');
+
+let throws=0,starts=0,backs=0,menus=0;
+c.launchHuman=()=>throws++;c.finishPreStartPause=()=>{starts++;c.preStartPause=false};c.setupGoBack=()=>backs++;c.showSetup=()=>menus++;c.startNoticeEl=new Element();c.startNoticeEl.classList.remove=()=>{};c.modal.classList.remove=()=>{};
+c.preStartPause=false;c.gameMode='local';el('settingsDialog').close();
+w.fire('keydown',{code:'Space'});assert.equal(throws,1);
+w.fire('keydown',{code:'Space',repeat:true});assert.equal(throws,1);
+c.turn=false;w.fire('keydown',{code:'Space'});assert.equal(throws,1);c.turn=true;
+w.fire('keydown',{code:'Space',target:{closest:()=>({})}});assert.equal(throws,1);
+c.preStartPause=true;w.fire('keydown',{code:'Space'});assert.equal(starts,1);assert.equal(throws,1);
+el('settingsDialog').showModal();w.fire('keydown',{code:'Escape'});assert(!el('settingsDialog').open);assert.equal(menus,0);
+c.setupOverlay.classList.contains=()=>true;w.fire('keydown',{code:'Escape'});assert.equal(backs,1);w.fire('keydown',{code:'Space'});assert.equal(throws,1);
+c.setupOverlay.classList.contains=()=>false;w.fire('keydown',{code:'Escape'});assert.equal(menus,1);
+console.log('PASS: Space throw, repeat/turn/input guards, start pause, Escape dialog/back/menu');

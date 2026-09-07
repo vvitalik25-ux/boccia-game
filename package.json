@@ -3,6 +3,6 @@
   "private": true,
   "scripts": {
     "build": "node build.cjs",
-    "test": "node build.cjs --check"
+    "test": "node build.cjs --check && node settings-tests.cjs"
   }
 }

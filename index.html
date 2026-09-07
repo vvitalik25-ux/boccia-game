@@ -10,9 +10,39 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
 <title>Boccia Pocket — Individual</title>
-<link rel="stylesheet" href="styles.css?v=2026-09-06-online-stability-1">
+<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-1">
 </head>
 <body>
+<button id="settingsBtn" class="settingsButton" aria-haspopup="dialog">⚙ Настройки</button>
+<dialog id="settingsDialog" aria-labelledby="settingsTitle">
+  <div class="settingsHeading"><h2 id="settingsTitle">Настройки</h2><button id="settingsCloseBtn" aria-label="Закрыть настройки">✕</button></div>
+      <div class="orientationCard">
+        <div class="orientationHead">Расположение поля</div>
+        <div class="orientationButtons">
+          <button class="selected" id="fieldVerticalBtn">↕ Вертикально</button>
+          <button id="fieldHorizontalBtn">↔ Горизонтально</button>
+        </div>
+        <p class="orientationInfo" id="orientationInfo">Меняется только ориентация поля. Управление остаётся как сейчас.</p>
+      </div>
+<p id="orientationLock" class="setupSmall" hidden>В онлайн-комнате расположение поля задаёт создатель перед её созданием.</p>
+      <div class="aiCard">
+        <div class="aiHead"><span>Сложность ИИ</span></div>
+        <div class="aiGrid">
+          <button id="aiEasyBtn">Легко</button>
+          <button id="aiMediumBtn">Средне</button>
+          <button id="aiHardBtn">Сложно</button>
+          <button id="aiExpertBtn">Эксперт</button>
+        </div>
+        <p class="aiInfo" id="aiInfo">Эксперт: максимальный поиск позиции и минимальный разброс исполнения.</p>
+      </div>
+<p class="setupSmall">Сложность действует только на компьютерного соперника.</p>
+<div class="orientationCard"><div class="orientationHead">Управление прицелом</div>
+<div class="controlOptions">
+<button data-control-mode="joystick">Джойстик</button>
+<button data-control-mode="buttons">Стрелки на экране</button>
+<button data-control-mode="keyboard">WASD / стрелки клавиатуры</button>
+</div><p class="setupSmall">← → направление · ↑ ↓ сила. Удерживай для плавного изменения. Бросок — отдельной кнопкой.</p></div>
+</dialog>
 <div class="setupOverlay show" id="setupOverlay">
   <button class="setupBack hidden" id="setupBackBtn">← Назад</button>
   <div class="setupCard">
@@ -36,14 +66,7 @@
       <p class="setupSmall" id="formatHelp">1 × 1 · красный бокс 3 · синий бокс 4</p>
       <p class="setupSmall">Во время своего хода тапни внутри своего бокса, чтобы изменить позицию броска.</p>
 
-      <div class="orientationCard">
-        <div class="orientationHead">Расположение поля</div>
-        <div class="orientationButtons">
-          <button class="selected" id="fieldVerticalBtn">↕ Вертикально</button>
-          <button id="fieldHorizontalBtn">↔ Горизонтально</button>
-        </div>
-        <p class="orientationInfo" id="orientationInfo">Меняется только ориентация поля. Управление остаётся как сейчас.</p>
-      </div>
+
 
       <div class="realismCard">
         <div class="realismHead">
@@ -53,16 +76,7 @@
         <p class="realismInfo" id="realismInfo">Без случайных уходов. В реалистичном режиме мячи могут немного отклоняться.</p>
       </div>
 
-      <div class="aiCard">
-        <div class="aiHead"><span>Сложность ИИ</span></div>
-        <div class="aiGrid">
-          <button id="aiEasyBtn">Легко</button>
-          <button id="aiMediumBtn">Средне</button>
-          <button id="aiHardBtn">Сложно</button>
-          <button id="aiExpertBtn">Эксперт</button>
-        </div>
-        <p class="aiInfo" id="aiInfo">Эксперт: максимальный поиск позиции и минимальный разброс исполнения.</p>
-      </div>
+
     </div>
 
 
@@ -238,7 +252,7 @@
     </div>
 
     <div class="compactAimGrid">
-      <div class="aimLeft">
+      <div class="aimLeft" id="legacySliders" hidden>
         <div class="sliderBox">
           <label for="angleSlider">Направление</label>
           <input type="range" id="angleSlider" min="0" max="1000" step="1" value="500">
@@ -249,7 +263,15 @@
         </div>
       </div>
 
-      <div class="throwSlot">
+      <div id="alternativeAim">
+<div id="joystickControl" class="joystick" role="group" aria-label="Джойстик прицела"><span id="joystickKnob">✥</span></div>
+<div id="buttonControl" class="directionButtons" hidden>
+<button data-aim="left" aria-label="Прицел влево">←</button><button data-aim="up" aria-label="Увеличить силу">↑</button><button data-aim="down" aria-label="Уменьшить силу">↓</button><button data-aim="right" aria-label="Прицел вправо">→</button>
+</div>
+<div id="keyboardControl" hidden>W / ↑ сила +<br>A / ← · D / →<br>S / ↓ сила −</div>
+<output id="aimValue" aria-label="Направление и сила"></output>
+</div>
+<div class="throwSlot">
         <button class="throwBtn" id="throwBtn">БРОСОК</button>
       </div>
 
@@ -267,6 +289,6 @@
 
 </div>
 
-<script src="game.js?v=2026-09-06-online-stability-1"></script>
+<script src="game.js?v=2026-09-07-settings-1"></script>
 </body>
 </html>

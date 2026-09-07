@@ -450,3 +450,25 @@ button:active{transform:scale(.97)}button:disabled{opacity:.28}
 .trainingHelp{margin:7px 2px 0;color:var(--muted);font-size:9px;line-height:1.35;text-align:center}
 
 .hidden{display:none!important}
+
+/* Settings stay reachable from the menu and the court. */
+[hidden],#legacySliders{display:none!important}
+.settingsButton{position:fixed;right:12px;top:calc(env(safe-area-inset-top) + 8px);z-index:110;padding:7px 10px;font-size:12px;min-height:32px}
+.setupCard{margin-top:35px}
+#settingsDialog{width:min(440px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid #45615b;border-radius:20px;background:#101f1e;color:#eef5ef;padding:18px}
+#settingsDialog::backdrop{background:rgba(0,8,8,.8)}
+.settingsHeading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.settingsHeading h2{margin:0;font-size:22px}
+.settingsHeading button{min-width:44px;min-height:44px}
+.controlOptions{display:grid;gap:8px;margin-top:12px}
+.controlOptions [aria-pressed=true]{background:#dfff68;color:#142019}
+#alternativeAim{height:74px;min-width:0;display:flex;align-items:center;justify-content:center;position:relative;padding-bottom:14px}
+#aimValue{position:absolute;bottom:0;font-size:10px;color:#dfff68;white-space:nowrap}
+.joystick{width:58px;height:58px;flex-shrink:0;border-radius:50%;border:1px solid #648b79;background:#243d36;display:grid;place-items:center;touch-action:none;cursor:grab}
+.joystick[aria-disabled=true]{opacity:.35}
+#joystickKnob{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:#dfff68;color:#142019;pointer-events:none;font-size:22px}
+.directionButtons{display:grid;grid-template-columns:repeat(2,minmax(32px,1fr));gap:3px;width:100%}
+.directionButtons button{height:26px;min-height:26px;padding:0;touch-action:none;font-size:20px}
+#keyboardControl{font-size:10px;line-height:1.5;text-align:center}
+#app{padding-top:calc(env(safe-area-inset-top) + 46px)}
+#settingsDialog{touch-action:pan-y}

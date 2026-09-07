@@ -117,6 +117,7 @@ function sliderValueToPower(value){
 }
 
 function updateUI(){
+  renderAimControls();
   puzzleExitBtn?.classList.toggle('hidden',gameMode!=='puzzle');
   onlineBadge?.classList.toggle('show',gameMode==='online'&&onlineMatchActive);
   aimPanel.classList.toggle('multiPlayerFormat',matchFormat!=='individual');

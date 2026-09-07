@@ -15,5 +15,6 @@
   "physics.js",
   "rendering.js",
   "input.js",
+  "settings.js",
   "bootstrap.js"
 ]

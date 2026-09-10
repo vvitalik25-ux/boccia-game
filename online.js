@@ -1,3 +1,4 @@
+let onlineEntryBusy=false,onlineEntryGeneration=0;
 function onlineClone(value){
   return value==null?value:JSON.parse(JSON.stringify(value));
 }
@@ -19,7 +20,7 @@ function onlineSend(type,payload={}){
 }
 async function onlineFetch(url,options={}){
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),10000);
+  const timer=setTimeout(()=>controller.abort(),15000);
   try{
     const response=await fetch(url,{...options,signal:controller.signal});
     // Consume the body under the same deadline; response.json() then reads a local copy.
@@ -302,6 +303,10 @@ function onlinePlayAnimation(animation,finalState,revision,events=[],transition=
 
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
+  onlineCreateBtn.disabled=onlineEntryBusy;
+  onlineJoinBtn.disabled=onlineEntryBusy;
+  onlineCreateBtn.textContent=onlineCreatingRoom?'Создаём…':'Создать комнату';
+  onlineJoinBtn.textContent=onlineEntryBusy&&!onlineCreatingRoom?'Проверяем…':'Войти';
   const hasRoom=!!onlineRoomCode;
   onlineConnectEl.classList.toggle('hidden',hasRoom);
   onlineLobbyEl.classList.toggle('hidden',!hasRoom);
@@ -778,8 +783,9 @@ function onlineConnectRoom(code,reconnecting=false){
   };
 }
 async function onlineCreateRoom(){
-  if(onlineCreatingRoom)return;
-  if(!await appCheckServerVersion(true))return;
+  if(onlineEntryBusy)return;
+  const generation=++onlineEntryGeneration;
+  onlineEntryBusy=true;
   onlineCreatingRoom=true;
   onlineConnectionStatus='';
   gameMode='online';
@@ -809,38 +815,49 @@ async function onlineCreateRoom(){
     });
     if(!r.ok)throw new Error(`HTTP ${r.status}`);
     const data=await r.json();
+    if(generation!==onlineEntryGeneration)return;
+    if(!appCheckBuildFromMessage(data))return;
     if(!data?.code)throw new Error('Нет кода комнаты');
     onlineRoomCode=onlineNormalizeRoomCode(data.code);
     onlineConnectRoom(onlineRoomCode,false);
   }catch(err){
+    if(generation!==onlineEntryGeneration)return;
     console.warn(err);
     onlineRoomCode='';
     showToast('Не удалось создать комнату');
-    onlineConnectionStatus='Сервер недоступен · попробуй ещё раз';
+    onlineConnectionStatus=onlineEntryError(err);
     renderOnlineLobby();
   }finally{
-    onlineCreatingRoom=false;
-    renderOnlineLobby();
+    if(generation===onlineEntryGeneration){onlineCreatingRoom=false;onlineEntryBusy=false;renderOnlineLobby();}
   }
 }
+function onlineEntryError(err){
+  if(navigator.onLine===false)return 'Нет подключения к интернету. Подключись к сети и повтори.';
+  if(err?.name==='AbortError')return 'Сервер не ответил за 15 секунд. Попробуй ещё раз или переключись между Wi-Fi и мобильным интернетом.';
+  return 'Не удалось связаться с сервером'+(/^HTTP \d+$/.test(err?.message||'')?' ('+err.message+')':'')+'. Повтори попытку. Если ошибка остаётся, попробуй другую сеть.';
+}
 async function onlineJoinRoom(code){
-  if(!await appCheckServerVersion(true))return;
+  if(onlineEntryBusy)return;
   code=onlineNormalizeRoomCode(code);
-  if(code.length<4){showToast('Неверный код комнаты');return}
-
+  if(code.length<4){onlineConnectionStatus='Введи код комнаты целиком';renderOnlineLobby();return;}
+  const generation=++onlineEntryGeneration;
+  onlineEntryBusy=true;onlineConnectionStatus='Проверяем комнату…';renderOnlineLobby();
   try{
-    const r=await onlineFetch(`${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,{
-      method:'GET',cache:'no-store'
-    });
-    if(r.status===404){showToast('Комната не найдена');return}
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const r=await onlineFetch(ONLINE_HTTP+'/room-check/'+encodeURIComponent(code),{method:'GET',cache:'no-store'});
+    if(generation!==onlineEntryGeneration)return;
+    if(r.status===404){onlineConnectionStatus='Комната не найдена. Проверь код у друга.';return;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    if(generation!==onlineEntryGeneration||!appCheckBuildFromMessage(data))return;
     onlineConnectRoom(code,false);
   }catch(err){
-    console.warn(err);
-    showToast('Не удалось проверить комнату');
+    if(generation===onlineEntryGeneration){console.warn(err);onlineConnectionStatus=onlineEntryError(err);}
+  }finally{
+    if(generation===onlineEntryGeneration){onlineEntryBusy=false;renderOnlineLobby();}
   }
 }
 function onlineDisconnect(clearRoom=true){
+  onlineEntryGeneration++;onlineEntryBusy=false;onlineCreatingRoom=false;
   onlineManualDisconnect=true;
   onlineClearWatchdog();
   onlineConnectionStatus='';

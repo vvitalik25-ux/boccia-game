@@ -10,7 +10,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#071010">
 <title>Boccia Pocket — Individual</title>
-<link rel="stylesheet" href="styles.css?v=2026-09-07-settings-5">
+<link rel="stylesheet" href="styles.css?v=2026-09-10-network-1">
 </head>
 <body>
 
@@ -94,6 +94,7 @@
         </div>
       </div>
 
+      <p class="onlineStatus" id="onlineStatus" role="status" aria-live="polite"></p>
       <div class="onlineLobby hidden" id="onlineLobby">
         <div class="onlineCodeCard">
           <div class="onlineCodeHead">Код комнаты</div>
@@ -106,7 +107,7 @@
           <div class="onlinePlayer"><b><i class="onlineDot" id="onlineRedDot"></i>Красные</b><span id="onlineRedPlayer">ожидание…</span></div>
           <div class="onlinePlayer"><b><i class="onlineDot" id="onlineBlueDot"></i>Синие</b><span id="onlineBluePlayer">ожидание…</span></div>
         </div>
-        <p class="onlineStatus" id="onlineStatus">Подключение…</p>
+
         <button class="onlineReady" id="onlineReadyBtn" disabled>Готов</button>
         <p class="onlineNote">Комнату и сам матч ведёт сервер. Формат, ориентация и реализм фиксируются при создании комнаты. В онлайне используются стандартные комплекты и Soft-джек.</p>
       </div>
@@ -291,6 +292,6 @@
 
 </div>
 
-<script src="game.js?v=2026-09-07-physics-60hz-1"></script>
+<script src="game.js?v=2026-09-10-network-1"></script>
 </body>
 </html>

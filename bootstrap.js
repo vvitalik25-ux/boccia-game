@@ -1,30 +1,17 @@
-const PHYSICS_STEP_MS=1000/60;
-const MAX_PHYSICS_STEPS_PER_FRAME=6;
-let loopLastTime=0;
-let loopAccumulator=0;
-
-function loop(now){
-  const current=Number.isFinite(now)?now:performance.now();
-  if(!loopLastTime)loopLastTime=current;
-
-  const elapsed=Math.max(0,Math.min(100,current-loopLastTime));
-  loopLastTime=current;
-  loopAccumulator+=elapsed;
-
-  let steps=0;
-  while(loopAccumulator>=PHYSICS_STEP_MS&&steps<MAX_PHYSICS_STEPS_PER_FRAME){
-    physics();
-    loopAccumulator-=PHYSICS_STEP_MS;
-    steps++;
+// Physics is tuned for 60 steps/second, independently of display refresh rate.
+let simulationLastTime=null,simulationRemainder=0;
+function loop(now=performance.now()){
+  if(simulationLastTime===null)simulationLastTime=now;
+  const elapsed=Math.max(0,now-simulationLastTime);simulationLastTime=now;
+  if(document.hidden||elapsed>250){simulationRemainder=0;}
+  else{
+    simulationRemainder+=elapsed;
+    const step=1000/60;
+    while(simulationRemainder+1e-7>=step){physics();simulationRemainder-=step;}
   }
-
-  if(steps===MAX_PHYSICS_STEPS_PER_FRAME&&loopAccumulator>=PHYSICS_STEP_MS){
-    loopAccumulator=0;
-  }
-
-  draw();
-  requestAnimationFrame(loop);
+  draw();requestAnimationFrame(loop);
 }
+document.addEventListener('visibilitychange',()=>{simulationLastTime=null;simulationRemainder=0;});
 
 // Automatic freshness check at boot.
 appCheckServerVersion(true);

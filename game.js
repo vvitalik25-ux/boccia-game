@@ -642,6 +642,7 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
 
 
 
+let onlineEntryBusy=false,onlineEntryGeneration=0;
 function onlineClone(value){
   return value==null?value:JSON.parse(JSON.stringify(value));
 }
@@ -663,7 +664,7 @@ function onlineSend(type,payload={}){
 }
 async function onlineFetch(url,options={}){
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),10000);
+  const timer=setTimeout(()=>controller.abort(),15000);
   try{
     const response=await fetch(url,{...options,signal:controller.signal});
     // Consume the body under the same deadline; response.json() then reads a local copy.
@@ -946,6 +947,10 @@ function onlinePlayAnimation(animation,finalState,revision,events=[],transition=
 
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
+  onlineCreateBtn.disabled=onlineEntryBusy;
+  onlineJoinBtn.disabled=onlineEntryBusy;
+  onlineCreateBtn.textContent=onlineCreatingRoom?'Создаём…':'Создать комнату';
+  onlineJoinBtn.textContent=onlineEntryBusy&&!onlineCreatingRoom?'Проверяем…':'Войти';
   const hasRoom=!!onlineRoomCode;
   onlineConnectEl.classList.toggle('hidden',hasRoom);
   onlineLobbyEl.classList.toggle('hidden',!hasRoom);
@@ -1422,8 +1427,9 @@ function onlineConnectRoom(code,reconnecting=false){
   };
 }
 async function onlineCreateRoom(){
-  if(onlineCreatingRoom)return;
-  if(!await appCheckServerVersion(true))return;
+  if(onlineEntryBusy)return;
+  const generation=++onlineEntryGeneration;
+  onlineEntryBusy=true;
   onlineCreatingRoom=true;
   onlineConnectionStatus='';
   gameMode='online';
@@ -1453,38 +1459,49 @@ async function onlineCreateRoom(){
     });
     if(!r.ok)throw new Error(`HTTP ${r.status}`);
     const data=await r.json();
+    if(generation!==onlineEntryGeneration)return;
+    if(!appCheckBuildFromMessage(data))return;
     if(!data?.code)throw new Error('Нет кода комнаты');
     onlineRoomCode=onlineNormalizeRoomCode(data.code);
     onlineConnectRoom(onlineRoomCode,false);
   }catch(err){
+    if(generation!==onlineEntryGeneration)return;
     console.warn(err);
     onlineRoomCode='';
     showToast('Не удалось создать комнату');
-    onlineConnectionStatus='Сервер недоступен · попробуй ещё раз';
+    onlineConnectionStatus=onlineEntryError(err);
     renderOnlineLobby();
   }finally{
-    onlineCreatingRoom=false;
-    renderOnlineLobby();
+    if(generation===onlineEntryGeneration){onlineCreatingRoom=false;onlineEntryBusy=false;renderOnlineLobby();}
   }
 }
+function onlineEntryError(err){
+  if(navigator.onLine===false)return 'Нет подключения к интернету. Подключись к сети и повтори.';
+  if(err?.name==='AbortError')return 'Сервер не ответил за 15 секунд. Попробуй ещё раз или переключись между Wi-Fi и мобильным интернетом.';
+  return 'Не удалось связаться с сервером'+(/^HTTP \d+$/.test(err?.message||'')?' ('+err.message+')':'')+'. Повтори попытку. Если ошибка остаётся, попробуй другую сеть.';
+}
 async function onlineJoinRoom(code){
-  if(!await appCheckServerVersion(true))return;
+  if(onlineEntryBusy)return;
   code=onlineNormalizeRoomCode(code);
-  if(code.length<4){showToast('Неверный код комнаты');return}
-
+  if(code.length<4){onlineConnectionStatus='Введи код комнаты целиком';renderOnlineLobby();return;}
+  const generation=++onlineEntryGeneration;
+  onlineEntryBusy=true;onlineConnectionStatus='Проверяем комнату…';renderOnlineLobby();
   try{
-    const r=await onlineFetch(`${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,{
-      method:'GET',cache:'no-store'
-    });
-    if(r.status===404){showToast('Комната не найдена');return}
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+    const r=await onlineFetch(ONLINE_HTTP+'/room-check/'+encodeURIComponent(code),{method:'GET',cache:'no-store'});
+    if(generation!==onlineEntryGeneration)return;
+    if(r.status===404){onlineConnectionStatus='Комната не найдена. Проверь код у друга.';return;}
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const data=await r.json();
+    if(generation!==onlineEntryGeneration||!appCheckBuildFromMessage(data))return;
     onlineConnectRoom(code,false);
   }catch(err){
-    console.warn(err);
-    showToast('Не удалось проверить комнату');
+    if(generation===onlineEntryGeneration){console.warn(err);onlineConnectionStatus=onlineEntryError(err);}
+  }finally{
+    if(generation===onlineEntryGeneration){onlineEntryBusy=false;renderOnlineLobby();}
   }
 }
 function onlineDisconnect(clearRoom=true){
+  onlineEntryGeneration++;onlineEntryBusy=false;onlineCreatingRoom=false;
   onlineManualDisconnect=true;
   onlineClearWatchdog();
   onlineConnectionStatus='';
@@ -4865,33 +4882,20 @@ window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
   if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });
-const PHYSICS_STEP_MS=1000/60;
-const MAX_PHYSICS_STEPS_PER_FRAME=6;
-let loopLastTime=0;
-let loopAccumulator=0;
-
-function loop(now){
-  const current=Number.isFinite(now)?now:performance.now();
-  if(!loopLastTime)loopLastTime=current;
-
-  const elapsed=Math.max(0,Math.min(100,current-loopLastTime));
-  loopLastTime=current;
-  loopAccumulator+=elapsed;
-
-  let steps=0;
-  while(loopAccumulator>=PHYSICS_STEP_MS&&steps<MAX_PHYSICS_STEPS_PER_FRAME){
-    physics();
-    loopAccumulator-=PHYSICS_STEP_MS;
-    steps++;
+// Physics is tuned for 60 steps/second, independently of display refresh rate.
+let simulationLastTime=null,simulationRemainder=0;
+function loop(now=performance.now()){
+  if(simulationLastTime===null)simulationLastTime=now;
+  const elapsed=Math.max(0,now-simulationLastTime);simulationLastTime=now;
+  if(document.hidden||elapsed>250){simulationRemainder=0;}
+  else{
+    simulationRemainder+=elapsed;
+    const step=1000/60;
+    while(simulationRemainder+1e-7>=step){physics();simulationRemainder-=step;}
   }
-
-  if(steps===MAX_PHYSICS_STEPS_PER_FRAME&&loopAccumulator>=PHYSICS_STEP_MS){
-    loopAccumulator=0;
-  }
-
-  draw();
-  requestAnimationFrame(loop);
+  draw();requestAnimationFrame(loop);
 }
+document.addEventListener('visibilitychange',()=>{simulationLastTime=null;simulationRemainder=0;});
 
 // Automatic freshness check at boot.
 appCheckServerVersion(true);

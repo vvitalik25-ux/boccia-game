@@ -3,6 +3,7 @@
   "configuration.js",
   "court.js",
   "inventory.js",
+  "http-transport.js",
   "online.js",
   "setup.js",
   "training.js",

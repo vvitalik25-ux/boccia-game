@@ -8,12 +8,14 @@ let onlineEntryBusy=false;
 let onlineEntryGeneration=0;
 let onlineHttpSyncInFlight=false;
 let onlineHttpActionInFlight=false;
-let onlineHttpSerial=Promise.resolve();
+const onlineTransport=new BocciaHttpTransport();
+let onlineCreateRequestId=null;
 let onlineConnectGeneration=0;
+let onlineHttpSessionId=null;
 
 const ONLINE_HTTP_POLL_ACTIVE=700;
 const ONLINE_HTTP_POLL_LOBBY=1000;
-const ONLINE_HTTP_STALE=12000;
+const ONLINE_HTTP_STALE=20000;
 const ONLINE_HTTP_TIMEOUT=15000;
 
 function onlineClone(value){
@@ -64,54 +66,30 @@ function onlineMarkOffline(message='Связь потеряна · восста�
 }
 
 async function onlineFetch(url,options={}){
-  const controller=typeof AbortController!=='undefined'?new AbortController():null;
-  let timer=null;
-  if(controller){
-    timer=setTimeout(()=>controller.abort(),ONLINE_HTTP_TIMEOUT);
-  }
-  try{
-    const response=await fetch(url,{
-      cache:'no-store',
-      credentials:'omit',
-      ...options,
-      ...(controller?{signal:controller.signal}:{})
-    });
-    const body=await response.text();
-    return{
-      ok:response.ok,
-      status:response.status,
-      text:body,
-      json:async()=>{
-        try{return JSON.parse(body)}
-        catch{throw new Error('Некорректный ответ сервера')}
-      }
-    };
-  }finally{
-    if(timer)clearTimeout(timer);
-  }
+  return onlineTransport.request(url,options);
 }
-
+function onlineCurrentSession(generation){return generation===onlineTransport.generation&&!onlineManualDisconnect;}
 function onlineRoomMessageUrl(code=onlineRoomCode){
   const clean=onlineNormalizeRoomCode(code);
   return `${ONLINE_HTTP}/http/room/${encodeURIComponent(clean)}/message`;
 }
 
-async function onlineHttpExchange(message,{code=onlineRoomCode,process=true}={}){
+async function onlineHttpExchange(message,{code=onlineRoomCode,process=true,generation=onlineTransport.generation}={}){
+  if(!onlineCurrentSession(generation))throw onlineTransport.stale();
   const clean=onlineNormalizeRoomCode(code);
   if(!clean)throw new Error('Нет комнаты');
 
-  const response=await onlineFetch(onlineRoomMessageUrl(clean),{
+  const response=await onlineTransport.request(onlineRoomMessageUrl(clean),{
     method:'POST',
     headers:{
-      'Content-Type':'application/json',
-      'Cache-Control':'no-cache',
-      'Pragma':'no-cache'
+      'Content-Type':'text/plain;charset=UTF-8'
     },
     body:JSON.stringify({
       clientKey:onlineClientKey,
+      sessionId:onlineHttpSessionId,
       message
     })
-  });
+  },generation);
 
   if(!response.ok){
     const err=new Error(`HTTP ${response.status}`);
@@ -120,10 +98,13 @@ async function onlineHttpExchange(message,{code=onlineRoomCode,process=true}={})
   }
 
   const payload=await response.json();
-  onlineMarkHealthy();
+  if(!onlineCurrentSession(generation)||clean!==onlineRoomCode)throw onlineTransport.stale();
+  if(!Array.isArray(payload?.messages))throw new Error('Некорректный ответ сервера');
+  if(process)onlineMarkHealthy();
 
   if(process&&Array.isArray(payload?.messages)){
     for(const data of payload.messages){
+      if(!onlineCurrentSession(generation))break;
       onlineHandleMessage(data);
     }
   }
@@ -136,20 +117,23 @@ function onlineSend(type,payload={}){
   const message={
     type,
     ...(type==='restart'?{matchId:onlineMatchId}:{}),
+    ...(type==='sync'?{knownMatchId:onlineMatchId}:{}),
     ...payload
   };
 
+  const generation=onlineTransport.generation;
   if(type==='sync'){
     if(onlineHttpSyncInFlight)return true;
     onlineHttpSyncInFlight=true;
-    onlineHttpExchange(message)
+    onlineHttpExchange(message,{generation})
       .catch(err=>{
+        if(!onlineCurrentSession(generation)||err.stale)return;
         console.warn('online sync',err);
         onlineMarkOffline();
         onlineScheduleReconnect();
       })
       .finally(()=>{
-        onlineHttpSyncInFlight=false;
+        if(onlineCurrentSession(generation))onlineHttpSyncInFlight=false;
       });
     return true;
   }
@@ -157,9 +141,9 @@ function onlineSend(type,payload={}){
   // State-changing commands are serialized so restart/leave/action order
   // cannot change on a slow mobile connection.
   const code=onlineRoomCode;
-  onlineHttpSerial=onlineHttpSerial
-    .then(()=>onlineHttpExchange(message,{code}))
+  onlineTransport.serial(generation=>onlineHttpExchange(message,{code,generation}))
     .catch(err=>{
+      if(!onlineCurrentSession(generation)||err.stale)return;
       console.warn('online send',type,err);
       onlineMarkOffline();
       onlineScheduleReconnect();
@@ -176,7 +160,7 @@ function onlineWatchConnection(){
   onlineClearWatchdog();
   onlineWatchdogTimer=setTimeout(()=>{
     if(gameMode!=='online'||!onlineRoomCode)return;
-    if(Date.now()-onlineLastResponseAt>=ONLINE_HTTP_STALE){
+    if(Date.now()-onlineLastResponseAt>=ONLINE_HTTP_STALE&&!onlineHttpSyncInFlight&&!onlineHttpActionInFlight){
       onlineMarkOffline();
       onlineScheduleReconnect();
       return;
@@ -221,21 +205,23 @@ function onlineClearReconnect(){
 
 function onlineSendPendingAction(){
   if(!onlinePendingAction||onlineHttpActionInFlight||!onlineRoomCode)return;
+  const generation=onlineTransport.generation;
   const pending=onlinePendingAction;
   const code=onlineRoomCode;
   onlineHttpActionInFlight=true;
 
-  onlineHttpSerial=onlineHttpSerial
-    .then(()=>onlineHttpExchange({
+  onlineTransport.serial(generation=>onlineHttpExchange({
       type:pending.type,
       ...pending.payload
-    },{code}))
+    },{code,generation}))
     .catch(err=>{
+      if(!onlineCurrentSession(generation)||err.stale)return;
       console.warn('online action',err);
       onlineMarkOffline();
       onlineScheduleReconnect();
     })
     .finally(()=>{
+      if(!onlineCurrentSession(generation))return;
       onlineHttpActionInFlight=false;
       if(!onlinePendingAction||onlinePendingAction.actionId!==pending.actionId)return;
 
@@ -858,6 +844,7 @@ function onlineHandleMessage(data){
     onlineAckAction(data.ackActionId);
 
     if(data.state){
+      if(onlineMatchActive&&onlineMatchId!==data.state.matchId){onlineResetPlayback();onlineMatchActive=false;}
       const rev=Number(data.revision)||0;
 
       if(!onlineMatchActive){
@@ -905,6 +892,9 @@ function onlineHandleMessage(data){
     return;
   }
 
+  if(data.type==='session_replaced'){
+    onlineDisconnect(true);onlineConnectionStatus='Эта комната открыта в другой вкладке. Войди снова.';renderOnlineLobby();return;
+  }
   if(data.type==='room_full'){
     onlineDisconnect(true);
     showToast('В комнате уже два игрока. Проверь код или создай новую комнату.');
@@ -933,8 +923,7 @@ function onlineHandleMessage(data){
 // -------------------- connect / reconnect --------------------
 
 function onlineScheduleReconnect(){
-  onlineClearReconnect();
-  if(onlineManualDisconnect||!onlineRoomCode)return;
+  if(onlineReconnectTimer||onlineManualDisconnect||!onlineRoomCode||navigator.onLine===false)return;
 
   const delay=Math.min(
     8000,
@@ -956,6 +945,9 @@ async function onlineConnectRoom(code,reconnecting=false){
   }
 
   const generation=++onlineConnectGeneration;
+  onlineTransport.reset();
+  onlineHttpSyncInFlight=false;onlineHttpActionInFlight=false;
+  onlineClearSync();
 
   onlineRoomCode=code;
   onlineManualDisconnect=false;
@@ -965,6 +957,7 @@ async function onlineConnectRoom(code,reconnecting=false){
   sideController={red:'p1',blue:'p2'};
 
   if(!reconnecting){
+    onlineHttpSessionId=onlineMakeActionId();
     onlineClearActionRetry();
     onlineClearSync();
     onlinePendingAction=null;
@@ -994,7 +987,7 @@ async function onlineConnectRoom(code,reconnecting=false){
       protocol:ONLINE_PROTOCOL
     },{code});
 
-    if(generation!==onlineConnectGeneration)return false;
+    if(generation!==onlineConnectGeneration||!onlineSide||onlineManualDisconnect)return false;
 
     onlineMarkHealthy();
     onlineWatchConnection();
@@ -1006,6 +999,7 @@ async function onlineConnectRoom(code,reconnecting=false){
     console.warn('online join',err);
 
     if(err?.status===404){
+      onlineRoomCode='';
       onlineSetTransportState(false);
       onlineConnectionStatus='Комната не найдена. Проверь код.';
       renderOnlineLobby();
@@ -1041,6 +1035,7 @@ async function onlineCreateRoom(){
     const pc=court();
     const params=new URLSearchParams({
       clientKey:onlineClientKey,
+      requestId:onlineCreateRequestId||(onlineCreateRequestId=onlineMakeActionId()),
       format:'individual',
       orientation:fieldOrientation,
       realism:realisticMode?'1':'0',
@@ -1051,9 +1046,7 @@ async function onlineCreateRoom(){
       protocol:ONLINE_PROTOCOL
     });
 
-    const r=await onlineFetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
-      method:'GET'
-    });
+    const r=await onlineTransport.retryRequest(`${ONLINE_HTTP}/create-room?${params.toString()}`,{method:'GET'},attempt=>{onlineConnectionStatus='Повторяем создание комнаты · попытка '+attempt+' из 3';renderOnlineLobby();});
 
     if(!r.ok)throw Object.assign(new Error(`HTTP ${r.status}`),{status:r.status});
 
@@ -1063,6 +1056,7 @@ async function onlineCreateRoom(){
     if(!appCheckBuildFromMessage(data))return;
     if(!data?.code)throw new Error('Нет кода комнаты');
 
+    onlineCreateRequestId=null;
     onlineRoomCode=onlineNormalizeRoomCode(data.code);
     await onlineConnectRoom(onlineRoomCode,false);
   }catch(err){
@@ -1111,22 +1105,6 @@ async function onlineJoinRoom(code){
   renderOnlineLobby();
 
   try{
-    const r=await onlineFetch(
-      `${ONLINE_HTTP}/room-check/${encodeURIComponent(code)}`,
-      {method:'GET'}
-    );
-
-    if(generation!==onlineEntryGeneration)return;
-
-    if(r.status===404){
-      onlineConnectionStatus='Комната не найдена. Проверь код у друга.';
-      return;
-    }
-    if(!r.ok)throw Object.assign(new Error(`HTTP ${r.status}`),{status:r.status});
-
-    const data=await r.json();
-    if(generation!==onlineEntryGeneration||!appCheckBuildFromMessage(data))return;
-
     await onlineConnectRoom(code,false);
   }catch(err){
     if(generation===onlineEntryGeneration){
@@ -1142,6 +1120,9 @@ async function onlineJoinRoom(code){
 }
 
 function onlineDisconnect(clearRoom=true){
+  const leavingCode=onlineRoomCode,leavingSide=onlineSide,leavingSession=onlineHttpSessionId;
+  onlineTransport.reset();
+  onlineCreateRequestId=null;
   onlineEntryGeneration++;
   onlineConnectGeneration++;
   onlineEntryBusy=false;
@@ -1156,14 +1137,11 @@ function onlineDisconnect(clearRoom=true){
   onlineClearTransition();
   onlineClearEventTimers();
 
-  const code=onlineRoomCode;
-  if(code&&onlineSide){
-    // Queue leave behind any already-sent state-changing command.
-    onlineHttpSerial=onlineHttpSerial
-      .then(()=>onlineHttpExchange({type:'leave'},{code,process:false}))
-      .catch(()=>{});
+  if(leavingCode&&leavingSide){
+    // Leave is best effort and cannot revive the old session or block the new one.
+    const detached=new BocciaHttpTransport({timeout:5000});
+    detached.request(onlineRoomMessageUrl(leavingCode),{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({clientKey:onlineClientKey,sessionId:leavingSession,message:{type:'leave'}})}).catch(()=>{});
   }
-
   onlineConnectionStatus='';
   onlineMatchId=null;
   onlinePhysicsProfile=null;
@@ -1217,3 +1195,14 @@ window.addEventListener('online',()=>{
     onlineConnectRoom(onlineRoomCode,true);
   }
 });
+
+
+async function onlineRestartRoom(){
+  if(!onlineRoomCode)return;
+  const generation=onlineTransport.generation;
+  const message={type:'restart',actionId:onlineMakeActionId(),matchId:onlineMatchId};
+  try{
+    await onlineTransport.serial(generation=>onlineHttpExchange(message,{generation}));
+    if(onlineCurrentSession(generation)){onlineDisconnect(true);showSetup();}
+  }catch(err){if(onlineCurrentSession(generation))onlineMarkOffline('Не удалось начать заново. Повтори после восстановления связи.');}
+}

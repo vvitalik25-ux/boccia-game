@@ -162,8 +162,7 @@ puzzleExitBtn?.addEventListener('click',()=>{
 });
 restartBtn.addEventListener('click',()=>{
   if(gameMode==='online'){
-    onlineSend('restart',{actionId:onlineMakeActionId()});
-    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
+    onlineRestartRoom();
     return;
   }
   if(gameMode==='training'&&phase!=='trainingEdit')restoreTrainingEditor();
@@ -174,8 +173,7 @@ againBtn.addEventListener('click',()=>{
   modal.classList.remove('show');
   if(gameMode==='training'&&trainingSnapshot)repeatTrainingSituation();
   else if(gameMode==='online'){
-    onlineSend('restart',{actionId:onlineMakeActionId()});
-    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
+    onlineRestartRoom();
   }
   else if(gameMode==='puzzle'){
     if(puzzleLastSuccess)startRandomPuzzle();
@@ -189,4 +187,5 @@ document.addEventListener('selectstart',e=>{if(!e.target.closest?.('input,textar
 document.addEventListener('dragstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('gesturestart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
+
 

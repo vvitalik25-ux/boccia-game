@@ -204,6 +204,7 @@ let allocationWorking={};
 let ballAllocation={red:{3:[]},blue:{4:[]}};
 const minSpeed=.045;
 
+
 function realismSoftnessFactor(hardnessId=null){
   const map={superHard:.45,hard:.58,medium:.72,mediumSoft:.87,soft:1.02,superSoft:1.18};
   return map[hardnessId||'soft']??1.02;
@@ -321,6 +322,7 @@ function renderFormatButtons(){
 
   renderFieldOrientation();
 }
+
 
 function court(){
   const ratio=12.5/6,pad=7,aw=W-pad*2,ah=H-pad*2;
@@ -499,6 +501,7 @@ function showTimedNotice(title,text,duration=1750){
   },duration);
 }
 
+
 function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0))}
 function allObjects(){return jack?[jack,...balls]:[...balls]}
 function moving(){return allObjects().some(b=>Math.hypot(b.vx,b.vy)>.06||Math.abs(b.vz||0)>.05)}
@@ -642,121 +645,328 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
 
 
 
-let onlineEntryBusy=false,onlineEntryGeneration=0;
+
+// Owns requests for one room session. Reset invalidates both queued and in-flight work.
+class BocciaHttpTransport{
+  constructor({fetchImpl=(...args)=>fetch(...args),timeout=15000}={}){
+    this.fetchImpl=fetchImpl;this.timeout=timeout;this.generation=0;this.controllers=new Set();this.queue=Promise.resolve();
+  }
+  stale(){return Object.assign(new Error('Session replaced'),{name:'AbortError',stale:true});}
+  reset(){this.generation++;for(const c of this.controllers)c.abort();this.controllers.clear();this.queue=Promise.resolve();}
+  async request(url,options={},generation=this.generation){
+    if(generation!==this.generation)throw this.stale();
+    const controller=new AbortController();this.controllers.add(controller);
+    const timer=setTimeout(()=>controller.abort(),this.timeout);
+    try{
+      const response=await this.fetchImpl(url,{cache:'no-store',credentials:'omit',...options,signal:controller.signal});
+      const text=await response.text();
+      if(generation!==this.generation)throw this.stale();
+      return{ok:response.ok,status:response.status,text,json:async()=>{try{return JSON.parse(text)}catch{throw Object.assign(new Error('Invalid JSON'),{code:'INVALID_RESPONSE'})}}};
+    }catch(error){if(generation!==this.generation)throw this.stale();throw error;}
+    finally{clearTimeout(timer);this.controllers.delete(controller);}
+  }
+  async retryRequest(url,options={},onRetry=()=>{}){
+    const generation=this.generation;
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const response=await this.request(url,options,generation);
+        if(![429,502,503,504].includes(response.status)||attempt===2)return response;
+      }catch(error){if(error.stale||attempt===2||!(error.name==='TypeError'||error.name==='AbortError'))throw error;}
+      onRetry(attempt+2);
+      await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));
+      if(generation!==this.generation)throw this.stale();
+    }
+  }
+  serial(task){const generation=this.generation;const result=this.queue.then(()=>{if(generation!==this.generation)throw this.stale();return task(generation)});this.queue=result.catch(()=>{});return result;}
+}
+// ============================================================
+// BOCCIA ONLINE V2 — HTTPS ONLY
+// No WebSocket, no transport monkey-patching.
+// Server remains authoritative. All actions are idempotent.
+// ============================================================
+
+let onlineEntryBusy=false;
+let onlineEntryGeneration=0;
+let onlineHttpSyncInFlight=false;
+let onlineHttpActionInFlight=false;
+const onlineTransport=new BocciaHttpTransport();
+let onlineCreateRequestId=null;
+let onlineConnectGeneration=0;
+let onlineHttpSessionId=null;
+
+const ONLINE_HTTP_POLL_ACTIVE=700;
+const ONLINE_HTTP_POLL_LOBBY=1000;
+const ONLINE_HTTP_STALE=20000;
+const ONLINE_HTTP_TIMEOUT=15000;
+
 function onlineClone(value){
   return value==null?value:JSON.parse(JSON.stringify(value));
 }
+
 function onlineNormalizeRoomCode(value){
   const lookalikes={'А':'A','В':'B','С':'C','Е':'E','Н':'H','К':'K','М':'M','О':'O','Р':'P','Т':'T','Х':'X','У':'Y'};
-  return String(value||'').toUpperCase().replace(/[АВСЕНКМОРТХУ]/g,c=>lookalikes[c]).replace(/[^A-Z0-9]/g,'').slice(0,8);
+  return String(value||'')
+    .toUpperCase()
+    .replace(/[АВСЕНКМОРТХУ]/g,c=>lookalikes[c])
+    .replace(/[^A-Z0-9]/g,'')
+    .slice(0,8);
 }
+
 function onlineSocketOpen(){
-  return !!onlineSocket&&onlineSocket.readyState===WebSocket.OPEN;
+  return !!onlineSocket &&
+    onlineSocket.readyState===1 &&
+    !!onlineRoomCode &&
+    Date.now()-onlineLastResponseAt<ONLINE_HTTP_STALE;
 }
-function onlineSend(type,payload={}){
-  if(!onlineSocketOpen())return false;
-  try{
-    onlineSocket.send(JSON.stringify({type,...(type==='restart'?{matchId:onlineMatchId}:{}),...payload}));
-    return true;
-  }catch{
-    return false;
+
+function onlineSetTransportState(open){
+  if(open){
+    if(!onlineSocket)onlineSocket={readyState:1,transport:'https'};
+    else onlineSocket.readyState=1;
+  }else if(onlineSocket){
+    onlineSocket.readyState=0;
   }
 }
+
+function onlineMarkHealthy(){
+  onlineLastResponseAt=Date.now();
+  onlineReconnectAttempts=0;
+  onlineSetTransportState(true);
+  if(onlineConnectionStatus){
+    onlineConnectionStatus='';
+    updateUI();
+    renderOnlineLobby();
+  }
+}
+
+function onlineMarkOffline(message='Связь потеряна · восстанавливаем…'){
+  onlineSetTransportState(false);
+  onlineConnectionStatus=message;
+  updateUI();
+  renderOnlineLobby();
+}
+
 async function onlineFetch(url,options={}){
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),15000);
-  try{
-    const response=await fetch(url,{...options,signal:controller.signal});
-    // Consume the body under the same deadline; response.json() then reads a local copy.
-    const body=await response.text();
-    return {ok:response.ok,status:response.status,json:async()=>JSON.parse(body)};
-  }finally{clearTimeout(timer)}
+  return onlineTransport.request(url,options);
 }
+function onlineCurrentSession(generation){return generation===onlineTransport.generation&&!onlineManualDisconnect;}
+function onlineRoomMessageUrl(code=onlineRoomCode){
+  const clean=onlineNormalizeRoomCode(code);
+  return `${ONLINE_HTTP}/http/room/${encodeURIComponent(clean)}/message`;
+}
+
+async function onlineHttpExchange(message,{code=onlineRoomCode,process=true,generation=onlineTransport.generation}={}){
+  if(!onlineCurrentSession(generation))throw onlineTransport.stale();
+  const clean=onlineNormalizeRoomCode(code);
+  if(!clean)throw new Error('Нет комнаты');
+
+  const response=await onlineTransport.request(onlineRoomMessageUrl(clean),{
+    method:'POST',
+    headers:{
+      'Content-Type':'text/plain;charset=UTF-8'
+    },
+    body:JSON.stringify({
+      clientKey:onlineClientKey,
+      sessionId:onlineHttpSessionId,
+      message
+    })
+  },generation);
+
+  if(!response.ok){
+    const err=new Error(`HTTP ${response.status}`);
+    err.status=response.status;
+    throw err;
+  }
+
+  const payload=await response.json();
+  if(!onlineCurrentSession(generation)||clean!==onlineRoomCode)throw onlineTransport.stale();
+  if(!Array.isArray(payload?.messages))throw new Error('Некорректный ответ сервера');
+  if(process)onlineMarkHealthy();
+
+  if(process&&Array.isArray(payload?.messages)){
+    for(const data of payload.messages){
+      if(!onlineCurrentSession(generation))break;
+      onlineHandleMessage(data);
+    }
+  }
+  return payload;
+}
+
+function onlineSend(type,payload={}){
+  if(!onlineRoomCode)return false;
+
+  const message={
+    type,
+    ...(type==='restart'?{matchId:onlineMatchId}:{}),
+    ...(type==='sync'?{knownMatchId:onlineMatchId}:{}),
+    ...payload
+  };
+
+  const generation=onlineTransport.generation;
+  if(type==='sync'){
+    if(onlineHttpSyncInFlight)return true;
+    onlineHttpSyncInFlight=true;
+    onlineHttpExchange(message,{generation})
+      .catch(err=>{
+        if(!onlineCurrentSession(generation)||err.stale)return;
+        console.warn('online sync',err);
+        onlineMarkOffline();
+        onlineScheduleReconnect();
+      })
+      .finally(()=>{
+        if(onlineCurrentSession(generation))onlineHttpSyncInFlight=false;
+      });
+    return true;
+  }
+
+  // State-changing commands are serialized so restart/leave/action order
+  // cannot change on a slow mobile connection.
+  const code=onlineRoomCode;
+  onlineTransport.serial(generation=>onlineHttpExchange(message,{code,generation}))
+    .catch(err=>{
+      if(!onlineCurrentSession(generation)||err.stale)return;
+      console.warn('online send',type,err);
+      onlineMarkOffline();
+      onlineScheduleReconnect();
+    });
+  return true;
+}
+
 function onlineClearWatchdog(){
-  clearTimeout(onlineWatchdogTimer);onlineWatchdogTimer=null;
+  clearTimeout(onlineWatchdogTimer);
+  onlineWatchdogTimer=null;
 }
-function onlineWatchConnection(ws){
+
+function onlineWatchConnection(){
   onlineClearWatchdog();
   onlineWatchdogTimer=setTimeout(()=>{
-    if(ws!==onlineSocket)return;
-    if(Date.now()-onlineLastResponseAt>=12000){
-      onlineConnectionStatus='Связь потеряна · переподключаемся…';
-      onlineConnectRoom(onlineRoomCode,true);
+    if(gameMode!=='online'||!onlineRoomCode)return;
+    if(Date.now()-onlineLastResponseAt>=ONLINE_HTTP_STALE&&!onlineHttpSyncInFlight&&!onlineHttpActionInFlight){
+      onlineMarkOffline();
+      onlineScheduleReconnect();
       return;
     }
-    onlineWatchConnection(ws);
-  },2000);
+    onlineWatchConnection();
+  },2500);
 }
+
 function onlineResetPlayback(){
-  onlineClearAnimation();onlineClearTransition();onlineClearEventTimers();
-  onlineDeferredSnapshot=null;onlineLatestSnapshot=null;
+  onlineClearAnimation();
+  onlineClearTransition();
+  onlineClearEventTimers();
+  onlineDeferredSnapshot=null;
+  onlineLatestSnapshot=null;
 }
+
 function onlineMakeActionId(){
   const p=(onlineClientKey||'c').replace(/[^a-zA-Z0-9]/g,'').slice(-8);
   return `${p}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
 }
+
 function onlineClearActionRetry(){
   if(onlineActionRetryTimer){
     clearTimeout(onlineActionRetryTimer);
     onlineActionRetryTimer=null;
   }
 }
+
 function onlineClearSync(){
   if(onlineSyncTimer){
     clearTimeout(onlineSyncTimer);
     onlineSyncTimer=null;
   }
 }
+
 function onlineClearReconnect(){
   if(onlineReconnectTimer){
     clearTimeout(onlineReconnectTimer);
     onlineReconnectTimer=null;
   }
 }
-function onlineSendPendingAction(){
-  if(!onlinePendingAction||!onlineSocketOpen())return;
-  onlineSend(onlinePendingAction.type,onlinePendingAction.payload);
 
-  onlineClearActionRetry();
-  onlineActionRetryTimer=setTimeout(()=>{
-    onlineActionRetryTimer=null;
-    if(!onlinePendingAction)return;
-    onlineSend('sync',{knownRevision:onlineRevision});
-    onlineSendPendingAction();
-  },Math.min(4000,500*Math.pow(2,onlinePendingAction.retries++)));
+function onlineSendPendingAction(){
+  if(!onlinePendingAction||onlineHttpActionInFlight||!onlineRoomCode)return;
+  const generation=onlineTransport.generation;
+  const pending=onlinePendingAction;
+  const code=onlineRoomCode;
+  onlineHttpActionInFlight=true;
+
+  onlineTransport.serial(generation=>onlineHttpExchange({
+      type:pending.type,
+      ...pending.payload
+    },{code,generation}))
+    .catch(err=>{
+      if(!onlineCurrentSession(generation)||err.stale)return;
+      console.warn('online action',err);
+      onlineMarkOffline();
+      onlineScheduleReconnect();
+    })
+    .finally(()=>{
+      if(!onlineCurrentSession(generation))return;
+      onlineHttpActionInFlight=false;
+      if(!onlinePendingAction||onlinePendingAction.actionId!==pending.actionId)return;
+
+      onlineClearActionRetry();
+      const delay=Math.min(5000,700*Math.pow(1.7,Math.min(6,pending.retries++)));
+      onlineActionRetryTimer=setTimeout(()=>{
+        onlineActionRetryTimer=null;
+        if(!onlinePendingAction)return;
+        // First ask for authoritative state. If server already committed
+        // the action, sync will acknowledge the new revision/state.
+        onlineSend('sync',{knownRevision:onlineRevision});
+        onlineSendPendingAction();
+      },delay);
+    });
 }
+
 function onlineQueueAction(type,payload={}){
   if(!onlineSocketOpen()||onlinePendingAction)return false;
+
   const actionId=onlineMakeActionId();
   onlinePendingAction={
     type,
     actionId,
     retries:0,
-    payload:{...payload,actionId,expectedRevision:onlineRevision,matchId:onlineMatchId}
+    payload:{
+      ...payload,
+      actionId,
+      expectedRevision:onlineRevision,
+      matchId:onlineMatchId
+    }
   };
+
   onlineSendPendingAction();
   updateUI();
   renderOnlineLobby();
   return true;
 }
+
 function onlineAckAction(actionId){
   if(!actionId||!onlinePendingAction)return;
   if(actionId!==onlinePendingAction.actionId)return;
+
   onlineClearActionRetry();
   onlinePendingAction=null;
   updateUI();
   renderOnlineLobby();
 }
-function onlineScheduleSync(delay=1000){
+
+function onlineScheduleSync(delay=null){
   onlineClearSync();
-  if(!onlineSocketOpen()||!onlineRoomCode)return;
+  if(!onlineRoomCode||onlineManualDisconnect)return;
+
+  const ms=delay??(onlineMatchActive?ONLINE_HTTP_POLL_ACTIVE:ONLINE_HTTP_POLL_LOBBY);
   onlineSyncTimer=setTimeout(()=>{
     onlineSyncTimer=null;
-    if(!onlineSocketOpen()||!onlineRoomCode)return;
+    if(!onlineRoomCode||onlineManualDisconnect)return;
+
     onlineSend('sync',{knownRevision:onlineRevision});
-    onlineScheduleSync(1000);
-  },delay);
+    onlineScheduleSync();
+  },ms);
 }
+
+// -------------------- server animation playback --------------------
+
 function onlineClearAnimation(){
   if(onlineAnimationTimer){
     cancelAnimationFrame(onlineAnimationTimer);
@@ -767,6 +977,7 @@ function onlineClearAnimation(){
   onlineAnimationMeta=null;
   onlineAnimationEvents=[];
 }
+
 function onlineClearTransition(){
   if(onlineTransitionTimer){
     clearTimeout(onlineTransitionTimer);
@@ -774,10 +985,12 @@ function onlineClearTransition(){
   }
   onlineTransitioning=false;
 }
+
 function onlineClearEventTimers(){
   for(const id of onlineEventTimers)clearTimeout(id);
   onlineEventTimers=[];
 }
+
 function onlineMetaObject(meta,coords){
   if(!meta||!coords)return null;
   const c=court();
@@ -795,6 +1008,7 @@ function onlineMetaObject(meta,coords){
     realism:null
   };
 }
+
 function onlineApplyAnimationFrame(frame,objects){
   if(!Array.isArray(frame)||!Array.isArray(objects))return;
   let nextJack=null;
@@ -812,6 +1026,7 @@ function onlineApplyAnimationFrame(frame,objects){
   jack=nextJack;
   balls=nextBalls;
 }
+
 function onlineEventMessage(ev){
   if(!ev)return '';
   if(ev.message)return ev.message;
@@ -825,6 +1040,7 @@ function onlineEventMessage(ev){
   if(ev.type==='tiebreak_winner')return `Тай-брейк выиграл ${sideOwnerName(ev.side)}`;
   return '';
 }
+
 function onlineShowAnimationEventsAtFrame(frameIndex){
   for(const ev of onlineAnimationEvents){
     if(ev._shown)continue;
@@ -834,6 +1050,7 @@ function onlineShowAnimationEventsAtFrame(frameIndex){
     if(msg)showToast(msg);
   }
 }
+
 function onlineShowResolutionEvents(events=[]){
   for(const ev of events){
     if(ev._shown)continue;
@@ -843,6 +1060,7 @@ function onlineShowResolutionEvents(events=[]){
     if(msg)showToast(msg);
   }
 }
+
 function onlineEndToast(transition){
   if(!transition)return '';
   if(transition.kind==='tiebreak_equal')return 'Тай-брейк равный — ещё один';
@@ -854,12 +1072,12 @@ function onlineEndToast(transition){
   if(pts.blue>0)return `${sideOwnerName('blue')}: +${pts.blue}`;
   return 'Энд без очков';
 }
+
 function onlineApplyPostAnimation(finalState,revision,events=[],transition=null){
   onlineClearAnimation();
   onlineShowResolutionEvents(events);
 
   if(transition?.interimState){
-    // Local 1x1 shows phase=end and the new score for exactly 1450 ms.
     onlineTransitioning=true;
     onlineApplyState(transition.interimState,revision);
     showToast(onlineEndToast(transition));
@@ -881,6 +1099,7 @@ function onlineApplyPostAnimation(finalState,revision,events=[],transition=null)
       }
 
       onlineScheduleSync(350);
+
       const deferred=onlineDeferredSnapshot;
       onlineDeferredSnapshot=null;
       if(deferred&&Number(deferred.revision)>Number(revision)){
@@ -899,58 +1118,65 @@ function onlineApplyPostAnimation(finalState,revision,events=[],transition=null)
     onlineApplyState(deferred.state,deferred.revision);
   }
 }
+
 function onlinePlayAnimation(animation,finalState,revision,events=[],transition=null){
   const frames=Array.isArray(animation?.frames)?animation.frames:[];
   const objects=Array.isArray(animation?.objects)?animation.objects:[];
 
   if(!frames.length||!objects.length){
-    // Never silently teleport on an incompatible animation payload.
+    // Correctness is more important than animation. If the server sent a
+    // final state but no usable animation, apply it instead of freezing.
     onlineAnimating=false;
-    showToast('Ошибка формата анимации');
-    if(onlineStatusEl){
-      onlineStatusEl.textContent='Worker отдаёт несовместимую анимацию';
-    }
+    onlineApplyState(finalState,revision);
+    onlineScheduleSync(350);
     return;
   }
 
   onlineClearAnimation();
   onlineClearTransition();
-  // Keep recovery polling alive during long animations for the connection watchdog.
-  onlineScheduleSync(1000);
 
   onlineAnimating=true;
   onlineAnimationRevision=Number(revision)||0;
   onlineAnimationMeta=objects;
   onlineAnimationEvents=(Array.isArray(events)?events:[]).map(ev=>({...ev,_shown:false}));
-
-  // Server frames represent a fixed 60 Hz simulation, independent of display refresh.
   onlineLatestSnapshot={state:finalState,revision};
+
   const startedAt=performance.now();
   let lastFrame=-1;
+
   const step=now=>{
     if(!onlineAnimating)return;
+
     const elapsed=Math.max(0,now-startedAt);
     const frame=Math.min(frames.length-1,Math.floor(elapsed*60/1000));
+
     if(frame!==lastFrame){
       onlineApplyAnimationFrame(frames[frame],objects);
       onlineShowAnimationEventsAtFrame(frame);
       lastFrame=frame;
     }
+
     if(elapsed>=frames.length*1000/60){
       onlineApplyPostAnimation(finalState,revision,onlineAnimationEvents,transition);
       return;
     }
+
     onlineAnimationTimer=requestAnimationFrame(step);
   };
+
   onlineAnimationTimer=requestAnimationFrame(step);
 }
 
+// -------------------- lobby / state --------------------
+
 function renderOnlineLobby(){
   if(!onlineLobbyEl)return;
+
   onlineCreateBtn.disabled=onlineEntryBusy;
   onlineJoinBtn.disabled=onlineEntryBusy;
   onlineCreateBtn.textContent=onlineCreatingRoom?'Создаём…':'Создать комнату';
   onlineJoinBtn.textContent=onlineEntryBusy&&!onlineCreatingRoom?'Проверяем…':'Войти';
+
   const hasRoom=!!onlineRoomCode;
   onlineConnectEl.classList.toggle('hidden',hasRoom);
   onlineLobbyEl.classList.toggle('hidden',!hasRoom);
@@ -958,9 +1184,12 @@ function renderOnlineLobby(){
 
   const red=onlinePlayers.find(p=>p.side==='red');
   const blue=onlinePlayers.find(p=>p.side==='blue');
+
   const label=p=>{
     if(!p)return 'ожидание…';
-    const who=p.id&&p.id===onlinePlayerId?'ты':(p.connected?'игрок подключён':'переподключается…');
+    const who=p.id&&p.id===onlinePlayerId
+      ?'ты'
+      :(p.connected?'игрок подключён':'нет связи');
     return `${who}${p.ready?' · готов':''}`;
   };
 
@@ -978,21 +1207,35 @@ function renderOnlineLobby(){
       ?'Бросок…'
       :onlineTransitioning
         ?'Подсчёт очков…'
-        :`Матч работает на сервере · версия ${onlineRevision}`;
+        :`HTTPS · сервер на связи · версия ${onlineRevision}`;
   }else if(onlineSide){
     const connected=onlinePlayers.filter(p=>p.connected).length;
-    if(connected<2)onlineStatusEl.textContent=`Ты — ${onlineSide==='red'?'красные':'синие'}. Ждём второго игрока.`;
-    else if(onlinePlayers.filter(p=>p.side).every(p=>p.ready))onlineStatusEl.textContent='Оба готовы · сервер запускает матч…';
-    else onlineStatusEl.textContent='Оба игрока должны нажать «Готов».';
+    if(connected<2){
+      onlineStatusEl.textContent=`Ты — ${onlineSide==='red'?'красные':'синие'}. Ждём второго игрока.`;
+    }else if(onlinePlayers.filter(p=>p.side).every(p=>p.ready)){
+      onlineStatusEl.textContent='Оба готовы · сервер запускает матч…';
+    }else{
+      onlineStatusEl.textContent='Оба игрока должны нажать «Готов».';
+    }
   }else if(hasRoom){
-    onlineStatusEl.textContent='Входим в комнату…';
+    onlineStatusEl.textContent='Подключение по HTTPS…';
   }
 
   const twoConnected=onlinePlayers.filter(p=>p.connected).length>=2;
-  onlineReadyBtn.disabled=!onlineSide||!twoConnected||!onlineSocketOpen()||onlineMatchActive||!!onlinePendingAction;
+  onlineReadyBtn.disabled=
+    !onlineSide||
+    !twoConnected||
+    !onlineSocketOpen()||
+    onlineMatchActive||
+    !!onlinePendingAction;
+
   onlineReadyBtn.classList.toggle('ready',onlineReady);
-  onlineReadyBtn.textContent=onlinePendingAction?.type==='ready'?'Отправляем…':(onlineReady?'✓ Готов':'Готов');
+  onlineReadyBtn.textContent=
+    onlinePendingAction?.type==='ready'
+      ?'Отправляем…'
+      :(onlineReady?'✓ Готов':'Готов');
 }
+
 function onlineDeserializeObject(o){
   if(!o)return null;
   const c=court();
@@ -1003,14 +1246,17 @@ function onlineDeserializeObject(o){
     y:c.y+(Number(o.v)||0)*c.h,
     z:(Number(o.z)||0)*c.w,
     vx:0,vy:0,vz:0,
-    r:ballR(),hitCd:0,
+    r:ballR(),
+    hitCd:0,
     entered:!!o.entered,
     hardnessId:o.hardnessId||(o.kind==='jack'?'soft':'medium'),
     realism:o.realism?onlineClone(o.realism):null
   };
 }
+
 function onlineApplyState(s,revision=0){
   if(!s)return false;
+
   const incoming=Number(revision??s.revision??0)||0;
   if(incoming<onlineRevision)return false;
 
@@ -1018,7 +1264,11 @@ function onlineApplyState(s,revision=0){
   onlineRevision=incoming;
   onlineMatchId=s.matchId||onlineMatchId;
   onlinePhysicsProfile=s.physicsProfile||onlinePhysicsProfile;
-  if(s.endNo!==endNo||!!s.tieBreak!==tieBreak){aimAngle=0;aimPower=.50;}
+
+  if(s.endNo!==endNo||!!s.tieBreak!==tieBreak){
+    aimAngle=0;
+    aimPower=.50;
+  }
 
   matchFormat=s.matchFormat||'individual';
   fieldOrientation=s.fieldOrientation==='horizontal'?'horizontal':'vertical';
@@ -1072,8 +1322,10 @@ function onlineApplyState(s,revision=0){
   updateUI();
   return true;
 }
+
 function onlineEnterMatch(state,revision){
   const resuming=onlineMatchActive&&(!state.matchId||state.matchId===onlineMatchId);
+
   onlineMatchActive=true;
   onlineGameStartSent=true;
   gameMode='online';
@@ -1082,11 +1334,13 @@ function onlineEnterMatch(state,revision){
   startNoticeEl.classList.remove('show');
   preStartPause=false;
   onlineBadge?.classList.add('show');
+
   onlineApplyState(state,revision);
   relayoutSoon();
   updateUI();
 
   if(resuming)return;
+
   aimAngle=0;
   aimPower=.50;
   updateUI();
@@ -1094,12 +1348,14 @@ function onlineEnterMatch(state,revision){
   showStartNotice(
     'Матч начинается',
     realisticMode
-      ? 'Тапни в свой бокс, чтобы выбрать позицию броска. Включён реалистичный режим: мяч может немного уводить.'
-      : 'Тапни в свой бокс, чтобы выбрать позицию броска. Затем настрой ползунки и нажми «БРОСОК».'
+      ?'Тапни в свой бокс, чтобы выбрать позицию броска. Включён реалистичный режим: мяч может немного уводить.'
+      :'Тапни в свой бокс, чтобы выбрать позицию броска. Затем настрой ползунки и нажми «БРОСОК».'
   );
 }
+
 function onlineHandleRoomState(data){
   onlinePlayers=Array.isArray(data.players)?data.players:[];
+
   const me=onlinePlayers.find(p=>p.id===onlinePlayerId);
   if(me)onlineReady=!!me.ready;
 
@@ -1113,6 +1369,9 @@ function onlineHandleRoomState(data){
   onlineAckAction(data.ackActionId);
   renderOnlineLobby();
 }
+
+// -------------------- build freshness --------------------
+
 function appVersionedUrl(build,hard=false){
   const u=new URL(location.href);
   u.searchParams.set('v',String(build||APP_BUILD));
@@ -1120,12 +1379,14 @@ function appVersionedUrl(build,hard=false){
   else u.searchParams.delete('_cb');
   return u;
 }
+
 function appMarkFreshUrl(){
   try{
     const u=appVersionedUrl(APP_BUILD,false);
     if(u.href!==location.href)history.replaceState(null,'',u.href);
   }catch{}
 }
+
 function appForceFreshReload(serverBuild){
   if(appVersionReloading)return false;
   appVersionReloading=true;
@@ -1133,39 +1394,34 @@ function appForceFreshReload(serverBuild){
   const target=String(serverBuild||'latest');
   const key=`boccia-cache-reload:${target}`;
   let attempts=0;
+
   try{attempts=Number(sessionStorage.getItem(key)||0)||0}catch{}
 
-  // Prevent an endless reload loop if GitHub Pages has not propagated the new file yet.
-  if(attempts>=3){
+  if(attempts>=2){
     appVersionReloading=false;
-    if(onlineStatusEl){
-      onlineStatusEl.textContent='Новая версия ещё распространяется · повтори через несколько секунд';
-    }
-    showToast('Сайт обновляется · попробуй ещё раз через несколько секунд');
+    onlineConnectionStatus='Версии клиента и сервера не совпадают · обнови страницу';
+    renderOnlineLobby();
     return false;
   }
 
   try{sessionStorage.setItem(key,String(attempts+1))}catch{}
 
   const u=appVersionedUrl(target,true);
-  // replace() prevents Back from reopening the stale cached copy.
   location.replace(u.href);
   return false;
 }
+
 async function appCheckServerVersion(force=false){
   if(appVersionReloading)return false;
 
   const now=Date.now();
-  if(!force&&appLastVersionCheckAt&&now-appLastVersionCheckAt<30000){
-    return true;
-  }
+  if(!force&&appLastVersionCheckAt&&now-appLastVersionCheckAt<30000)return true;
   if(appVersionCheckPromise)return appVersionCheckPromise;
 
   appVersionCheckPromise=(async()=>{
     try{
       const r=await onlineFetch(`${VERSION_CHECK_URL}?_=${Date.now()}`,{
-        method:'GET',
-        cache:'no-store'
+        method:'GET'
       });
       if(!r.ok)throw new Error(`version HTTP ${r.status}`);
 
@@ -1189,7 +1445,6 @@ async function appCheckServerVersion(force=false){
       return true;
     }catch(err){
       console.warn('version check failed',err);
-      // Local modes remain usable if the server is temporarily unreachable.
       return true;
     }finally{
       appVersionCheckPromise=null;
@@ -1198,6 +1453,7 @@ async function appCheckServerVersion(force=false){
 
   return appVersionCheckPromise;
 }
+
 function appCheckBuildFromMessage(data){
   const serverBuild=String(data?.build||'');
   if(serverBuild&&serverBuild!==APP_BUILD){
@@ -1206,10 +1462,11 @@ function appCheckBuildFromMessage(data){
   }
   return true;
 }
+
 function onlineProtocolOk(data){
-  if(!data?.protocol)return false;
-  return data.protocol===ONLINE_PROTOCOL;
+  return !!data?.protocol&&data.protocol===ONLINE_PROTOCOL;
 }
+
 function onlineProtocolMismatch(data=null){
   onlineClearActionRetry();
   onlineClearSync();
@@ -1217,6 +1474,9 @@ function onlineProtocolMismatch(data=null){
   onlineMatchActive=false;
   appForceFreshReload(data?.build||data?.protocol||'latest');
 }
+
+// -------------------- incoming messages --------------------
+
 function onlineHandleMessage(data){
   if(!data||typeof data!=='object')return;
 
@@ -1229,23 +1489,28 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='joined'){
+    onlineMarkHealthy();
     onlineConnectionStatus='';
-    onlineReconnectAttempts=0;
     onlinePlayerId=data.playerId;
     onlineSide=data.side;
     onlineReady=!!data.ready;
     onlineRevision=Number(data.revision)||0;
+
     if(data.config){
       matchFormat=data.config.matchFormat||matchFormat;
       fieldOrientation=data.config.fieldOrientation==='horizontal'?'horizontal':'vertical';
       realisticMode=!!data.config.realisticMode;
       renderFormatButtons();
     }
+
     if(Array.isArray(data.players))onlinePlayers=data.players;
+
     renderOnlineLobby();
+
     if(data.state)onlineEnterMatch(data.state,data.revision||0);
-    onlineSend('sync',{knownRevision:onlineRevision});
-    onlineScheduleSync(250);
+
+    onlineScheduleSync(200);
+
     if(onlinePendingAction)onlineSendPendingAction();
     return;
   }
@@ -1260,6 +1525,7 @@ function onlineHandleMessage(data){
     onlineAckAction(data.ackActionId);
 
     if(data.state){
+      if(onlineMatchActive&&onlineMatchId!==data.state.matchId){onlineResetPlayback();onlineMatchActive=false;}
       const rev=Number(data.revision)||0;
 
       if(!onlineMatchActive){
@@ -1276,17 +1542,19 @@ function onlineHandleMessage(data){
           data.transition||null
         );
       }else if(onlineAnimating||onlineTransitioning){
-        // A recovery poll can return the already-committed final state while
-        // the local playback is still running. Do not jump to the end.
         if(rev>onlineAnimationRevision){
           onlineDeferredSnapshot={state:data.state,revision:rev};
         }
       }else{
         onlineApplyState(data.state,rev);
-        if(data.transition)onlineApplyPostAnimation(data.state,rev,data.events||[],data.transition);
-        else if(data.events?.length)onlineShowResolutionEvents(data.events);
+        if(data.transition){
+          onlineApplyPostAnimation(data.state,rev,data.events||[],data.transition);
+        }else if(data.events?.length){
+          onlineShowResolutionEvents(data.events);
+        }
       }
     }
+
     renderOnlineLobby();
     return;
   }
@@ -1294,14 +1562,20 @@ function onlineHandleMessage(data){
   if(data.type==='action_error'){
     onlineResetPlayback();
     onlineAckAction(data.ackActionId);
+
     if(data.state){
       if(!onlineMatchActive)onlineEnterMatch(data.state,data.revision||0);
       else onlineApplyState(data.state,data.revision||0);
     }
+
     showToast(data.message||'Сервер отклонил действие');
+    onlineScheduleSync(250);
     return;
   }
 
+  if(data.type==='session_replaced'){
+    onlineDisconnect(true);onlineConnectionStatus='Эта комната открыта в другой вкладке. Войди снова.';renderOnlineLobby();return;
+  }
   if(data.type==='room_full'){
     onlineDisconnect(true);
     showToast('В комнате уже два игрока. Проверь код или создай новую комнату.');
@@ -1315,42 +1589,58 @@ function onlineHandleMessage(data){
     onlineClearActionRetry();
     onlinePendingAction=null;
     onlineMatchId=null;
-    onlineScheduleSync(250);
     onlineMatchActive=false;
     onlineRevision=0;
     onlineReady=false;
+
     modal.classList.remove('show');
     setupOverlay.classList.add('show');
     showSetupScreen('online');
     renderOnlineLobby();
-    return;
+    onlineScheduleSync(250);
   }
 }
+
+// -------------------- connect / reconnect --------------------
+
 function onlineScheduleReconnect(){
-  onlineClearReconnect();
-  if(onlineManualDisconnect||!onlineRoomCode)return;
+  if(onlineReconnectTimer||onlineManualDisconnect||!onlineRoomCode||navigator.onLine===false)return;
+
+  const delay=Math.min(
+    8000,
+    700*Math.pow(1.7,Math.min(6,onlineReconnectAttempts++))
+  );
+
   onlineReconnectTimer=setTimeout(()=>{
     onlineReconnectTimer=null;
-    if(onlineManualDisconnect||onlineSocketOpen()||!onlineRoomCode)return;
+    if(onlineManualDisconnect||!onlineRoomCode)return;
     onlineConnectRoom(onlineRoomCode,true);
-  },Math.min(10000,900*Math.pow(2,onlineReconnectAttempts++))+Math.random()*250);
+  },delay);
 }
-function onlineConnectRoom(code,reconnecting=false){
+
+async function onlineConnectRoom(code,reconnecting=false){
   code=onlineNormalizeRoomCode(code);
-  if(code.length<4){showToast('Неверный код комнаты');return}
+  if(code.length<4){
+    showToast('Неверный код комнаты');
+    return false;
+  }
+
+  const generation=++onlineConnectGeneration;
+  onlineTransport.reset();
+  onlineHttpSyncInFlight=false;onlineHttpActionInFlight=false;
+  onlineClearSync();
 
   onlineRoomCode=code;
   onlineManualDisconnect=false;
   onlineClearWatchdog();
   onlineClearReconnect();
-  onlineResetPlayback();
   gameMode='online';
   sideController={red:'p1',blue:'p2'};
 
   if(!reconnecting){
+    onlineHttpSessionId=onlineMakeActionId();
     onlineClearActionRetry();
     onlineClearSync();
-    onlineClearReconnect();
     onlinePendingAction=null;
     onlinePlayerId=null;
     onlineSide=null;
@@ -1360,74 +1650,56 @@ function onlineConnectRoom(code,reconnecting=false){
     onlineRevision=0;
     onlineMatchId=null;
     onlineReconnectAttempts=0;
+    onlineResetPlayback();
   }
 
-  const previous=onlineSocket;
-  onlineSocket=null;
-  if(previous){
-    try{previous.onclose=null;previous.close(1000,'replace')}catch{}
-  }
+  onlineSocket={readyState:0,transport:'https'};
+  onlineConnectionStatus=reconnecting
+    ?'Восстанавливаем связь по HTTPS…'
+    :'Подключение по HTTPS…';
 
   renderOnlineLobby();
 
-  let ws;
   try{
-    ws=new WebSocket(`${ONLINE_SERVER}/room/${encodeURIComponent(code)}`);
-  }catch{
-    onlineConnectionStatus='Не удалось открыть соединение';
-    renderOnlineLobby();
-    onlineScheduleReconnect();
-    return;
-  }
+    await onlineHttpExchange({
+      type:'join',
+      clientKey:onlineClientKey,
+      build:APP_BUILD,
+      protocol:ONLINE_PROTOCOL
+    },{code});
 
-  onlineSocket=ws;
-  onlineConnectionStatus=reconnecting?'Переподключение…':'Подключение…';
-  onlineLastResponseAt=Date.now();
-  onlineWatchConnection(ws);
-  renderOnlineLobby();
+    if(generation!==onlineConnectGeneration||!onlineSide||onlineManualDisconnect)return false;
 
-  ws.onopen=()=>{
-    if(ws!==onlineSocket)return;
-    onlineSend('join',{clientKey:onlineClientKey,build:APP_BUILD,protocol:ONLINE_PROTOCOL});
-  };
-  ws.onmessage=e=>{
-    if(ws!==onlineSocket)return;
-    onlineLastResponseAt=Date.now();
-    try{onlineHandleMessage(JSON.parse(e.data))}
-    catch(err){console.warn('online message',err)}
-  };
-  ws.onerror=()=>{
-    if(ws!==onlineSocket)return;
-    onlineConnectionStatus='Ошибка соединения · пробуем восстановить…';
-    renderOnlineLobby();
-  };
-  ws.onclose=e=>{
-    if(ws!==onlineSocket)return;
-    onlineSocket=null;
-    onlineClearWatchdog();
-    if(e.code===4001){
-      onlineDisconnect(true);
-      showToast('Игра открыта в другой вкладке');
-      showSetupScreen('online');
-      setupOverlay.classList.add('show');
-      return;
-    }
-    onlineClearActionRetry();
-    onlineClearSync();
-    onlineClearAnimation();
-    onlineClearTransition();
-    onlineDeferredSnapshot=null;
-    if(!onlineManualDisconnect&&onlineRoomCode){
-      onlineConnectionStatus='Связь потеряна · переподключаемся…';
-      if(onlineMatchActive)showToast('Связь потеряна · переподключаемся');
-      else onlineStatusEl.textContent='Связь потеряна · переподключаемся…';
+    onlineMarkHealthy();
+    onlineWatchConnection();
+    onlineScheduleSync(200);
+    return true;
+  }catch(err){
+    if(generation!==onlineConnectGeneration)return false;
+
+    console.warn('online join',err);
+
+    if(err?.status===404){
+      onlineRoomCode='';
+      onlineSetTransportState(false);
+      onlineConnectionStatus='Комната не найдена. Проверь код.';
       renderOnlineLobby();
-      onlineScheduleReconnect();
+      return false;
     }
-  };
+
+    onlineMarkOffline(
+      navigator.onLine===false
+        ?'Нет интернета · ждём сеть…'
+        :'Не удалось связаться с сервером · повторяем…'
+    );
+    onlineScheduleReconnect();
+    return false;
+  }
 }
+
 async function onlineCreateRoom(){
   if(onlineEntryBusy)return;
+
   const generation=++onlineEntryGeneration;
   onlineEntryBusy=true;
   onlineCreatingRoom=true;
@@ -1438,13 +1710,13 @@ async function onlineCreateRoom(){
   renderOnlineLobby();
 
   try{
-    // Online is an exact server-hosted copy of local 1 × 1.
     matchFormat='individual';
     renderFormatButtons();
 
     const pc=court();
     const params=new URLSearchParams({
       clientKey:onlineClientKey,
+      requestId:onlineCreateRequestId||(onlineCreateRequestId=onlineMakeActionId()),
       format:'individual',
       orientation:fieldOrientation,
       realism:realisticMode?'1':'0',
@@ -1454,76 +1726,108 @@ async function onlineCreateRoom(){
       build:APP_BUILD,
       protocol:ONLINE_PROTOCOL
     });
-    const r=await onlineFetch(`${ONLINE_HTTP}/create-room?${params.toString()}`,{
-      method:'GET',cache:'no-store'
-    });
-    if(!r.ok)throw new Error(`HTTP ${r.status}`);
+
+    const r=await onlineTransport.retryRequest(`${ONLINE_HTTP}/create-room?${params.toString()}`,{method:'GET'},attempt=>{onlineConnectionStatus='Повторяем создание комнаты · попытка '+attempt+' из 3';renderOnlineLobby();});
+
+    if(!r.ok)throw Object.assign(new Error(`HTTP ${r.status}`),{status:r.status});
+
     const data=await r.json();
+
     if(generation!==onlineEntryGeneration)return;
     if(!appCheckBuildFromMessage(data))return;
     if(!data?.code)throw new Error('Нет кода комнаты');
+
+    onlineCreateRequestId=null;
     onlineRoomCode=onlineNormalizeRoomCode(data.code);
-    onlineConnectRoom(onlineRoomCode,false);
+    await onlineConnectRoom(onlineRoomCode,false);
   }catch(err){
     if(generation!==onlineEntryGeneration)return;
-    console.warn(err);
+
+    console.warn('create room',err);
     onlineRoomCode='';
-    showToast('Не удалось создать комнату');
     onlineConnectionStatus=onlineEntryError(err);
+    showToast('Не удалось создать комнату');
     renderOnlineLobby();
   }finally{
-    if(generation===onlineEntryGeneration){onlineCreatingRoom=false;onlineEntryBusy=false;renderOnlineLobby();}
+    if(generation===onlineEntryGeneration){
+      onlineCreatingRoom=false;
+      onlineEntryBusy=false;
+      renderOnlineLobby();
+    }
   }
 }
+
 function onlineEntryError(err){
-  if(navigator.onLine===false)return 'Нет подключения к интернету. Подключись к сети и повтори.';
-  if(err?.name==='AbortError')return 'Сервер не ответил за 15 секунд. Попробуй ещё раз или переключись между Wi-Fi и мобильным интернетом.';
-  return 'Не удалось связаться с сервером'+(/^HTTP \d+$/.test(err?.message||'')?' ('+err.message+')':'')+'. Повтори попытку. Если ошибка остаётся, попробуй другую сеть.';
+  if(navigator.onLine===false){
+    return 'Нет подключения к интернету. Подключись к сети и повтори.';
+  }
+  if(err?.name==='AbortError'){
+    return 'Сервер не ответил за 15 секунд. Попробуй ещё раз.';
+  }
+  if(err?.status){
+    return `Сервер ответил с ошибкой ${err.status}. Попробуй ещё раз.`;
+  }
+  return 'Не удалось связаться с сервером. Попробуй ещё раз.';
 }
+
 async function onlineJoinRoom(code){
   if(onlineEntryBusy)return;
+
   code=onlineNormalizeRoomCode(code);
-  if(code.length<4){onlineConnectionStatus='Введи код комнаты целиком';renderOnlineLobby();return;}
+  if(code.length<4){
+    onlineConnectionStatus='Введи код комнаты целиком';
+    renderOnlineLobby();
+    return;
+  }
+
   const generation=++onlineEntryGeneration;
-  onlineEntryBusy=true;onlineConnectionStatus='Проверяем комнату…';renderOnlineLobby();
+  onlineEntryBusy=true;
+  onlineConnectionStatus='Проверяем комнату…';
+  renderOnlineLobby();
+
   try{
-    const r=await onlineFetch(ONLINE_HTTP+'/room-check/'+encodeURIComponent(code),{method:'GET',cache:'no-store'});
-    if(generation!==onlineEntryGeneration)return;
-    if(r.status===404){onlineConnectionStatus='Комната не найдена. Проверь код у друга.';return;}
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json();
-    if(generation!==onlineEntryGeneration||!appCheckBuildFromMessage(data))return;
-    onlineConnectRoom(code,false);
+    await onlineConnectRoom(code,false);
   }catch(err){
-    if(generation===onlineEntryGeneration){console.warn(err);onlineConnectionStatus=onlineEntryError(err);}
+    if(generation===onlineEntryGeneration){
+      console.warn('join room',err);
+      onlineConnectionStatus=onlineEntryError(err);
+    }
   }finally{
-    if(generation===onlineEntryGeneration){onlineEntryBusy=false;renderOnlineLobby();}
+    if(generation===onlineEntryGeneration){
+      onlineEntryBusy=false;
+      renderOnlineLobby();
+    }
   }
 }
+
 function onlineDisconnect(clearRoom=true){
-  onlineEntryGeneration++;onlineEntryBusy=false;onlineCreatingRoom=false;
+  const leavingCode=onlineRoomCode,leavingSide=onlineSide,leavingSession=onlineHttpSessionId;
+  onlineTransport.reset();
+  onlineCreateRequestId=null;
+  onlineEntryGeneration++;
+  onlineConnectGeneration++;
+  onlineEntryBusy=false;
+  onlineCreatingRoom=false;
   onlineManualDisconnect=true;
+
   onlineClearWatchdog();
-  onlineConnectionStatus='';
-  onlineMatchId=null;
-  onlinePhysicsProfile=null;
-  onlineLatestSnapshot=null;
   onlineClearActionRetry();
   onlineClearSync();
   onlineClearReconnect();
   onlineClearAnimation();
   onlineClearTransition();
   onlineClearEventTimers();
-  onlineDeferredSnapshot=null;
 
-  const ws=onlineSocket;
-  onlineSocket=null;
-  if(ws&&ws.readyState===WebSocket.OPEN){
-    try{ws.send(JSON.stringify({type:'leave'}))}catch{}
+  if(leavingCode&&leavingSide){
+    // Leave is best effort and cannot revive the old session or block the new one.
+    const detached=new BocciaHttpTransport({timeout:5000});
+    detached.request(onlineRoomMessageUrl(leavingCode),{method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8'},body:JSON.stringify({clientKey:onlineClientKey,sessionId:leavingSession,message:{type:'leave'}})}).catch(()=>{});
   }
-  if(ws){
-    try{ws.onclose=null;ws.close(1000,'leave')}catch{}
-  }
+  onlineConnectionStatus='';
+  onlineMatchId=null;
+  onlinePhysicsProfile=null;
+  onlineLatestSnapshot=null;
+  onlineDeferredSnapshot=null;
 
   onlinePendingAction=null;
   onlinePlayerId=null;
@@ -1535,12 +1839,19 @@ function onlineDisconnect(clearRoom=true){
   onlineRemoteMoving=false;
   onlineAuthority=false;
   onlineRevision=0;
+  onlineHttpSyncInFlight=false;
+  onlineHttpActionInFlight=false;
+
+  onlineSocket=null;
+
   if(clearRoom)onlineRoomCode='';
 
   renderOnlineLobby();
   onlineBadge?.classList.remove('show');
+
   setTimeout(()=>{onlineManualDisconnect=false},0);
 }
+
 function onlineOpenSetup(){
   pushSetupHistory();
   gameMode='online';
@@ -1550,11 +1861,31 @@ function onlineOpenSetup(){
   onlineDisconnect(true);
   showSetupScreen('online');
 }
+
 function onlineMaybeLiveSync(){
-  // Deliberately empty: no online physics/state streaming in the browser.
+  // Browser never simulates online physics.
 }
+
 function onlineSendAuthoritativeState(){
-  // Legacy compatibility hook. Server owns all online transitions.
+  // Compatibility hook. Server is authoritative.
+}
+
+// Recover automatically after Wi-Fi/mobile network comes back.
+window.addEventListener('online',()=>{
+  if(gameMode==='online'&&onlineRoomCode){
+    onlineConnectRoom(onlineRoomCode,true);
+  }
+});
+
+
+async function onlineRestartRoom(){
+  if(!onlineRoomCode)return;
+  const generation=onlineTransport.generation;
+  const message={type:'restart',actionId:onlineMakeActionId(),matchId:onlineMatchId};
+  try{
+    await onlineTransport.serial(generation=>onlineHttpExchange(message,{generation}));
+    if(onlineCurrentSession(generation)){onlineDisconnect(true);showSetup();}
+  }catch(err){if(onlineCurrentSession(generation))onlineMarkOffline('Не удалось начать заново. Повтори после восстановления связи.');}
 }
 function clearSetupTimers(){
   for(const id of setupTimers)clearTimeout(id);
@@ -1834,6 +2165,7 @@ function startKitSelection(){
   openKitStep(humanSides[0]||'red');
 }
 
+
 function trainingPlacedCount(side){
   return balls.filter(b=>b.kind===side).length;
 }
@@ -2086,6 +2418,7 @@ function repeatTrainingSituation(){
   restoreTrainingState(trainingSnapshot);
   beginTrainingSituation();
 }
+
 
 function puzzlePoint(xf,yf){
   const c=court();
@@ -2362,6 +2695,7 @@ function resolvePuzzleThrow(){
   showToast(`Осталось мячей: ${ballsLeft(puzzle.side)}`);
 }
 
+
 function autoAllocateSide(side){
   ballAllocation[side]=defaultAllocationForSide(side);
 }
@@ -2601,6 +2935,7 @@ function startTieBreak(firstSide){
   showToast(`Тай-брейк · первым ${sideOwnerName(firstSide)}`);
   scheduleBotIfNeeded('colour',650);
 }
+
 function playerSelectionLocked(side){
   return !!firstColourLockedBox[side] && phase===side;
 }
@@ -2834,6 +3169,7 @@ function declineRemaining(){
     finishEnd();
   }
 }
+
 
 function botTravelForSpeed(speed,decel){
   let s=Math.max(0,speed),travel=0;
@@ -3126,6 +3462,7 @@ function simulateBotCandidate(candidate,side,steps=260){
   }
   return st;
 }
+
 function evaluateBotState(st,side){
   if(!st.jack)return -100000;
   const opp=opponent(side);
@@ -4026,6 +4363,7 @@ function botThrowColour(side){
   phase='moving';tone(side==='red'?260:190,.05,.025);updateUI();
 }
 
+
 function isInsideBoundary(b){
   const c=court();
   return b.x-b.r>c.x && b.x+b.r<c.x+c.w && b.y-b.r>c.y && b.y+b.r<c.y+c.h;
@@ -4251,6 +4589,7 @@ function finishMatch(winner,byTieBreak){
   modal.classList.add('show');tone(640,.16,.04);
 }
 
+
 function physics(){
   if(phase==='trainingEdit')return;
   if(gameMode==='online')return;
@@ -4366,6 +4705,7 @@ function physics(){
     }
   }
 }
+
 
 function draw(){
   clearCanvasForDraw();const c=court(),bw=c.w/6,boxTop=my(10),boxBottom=my(12.5);
@@ -4548,6 +4888,7 @@ function drawAim(side){
   ctx.moveTo(ex,ey);ctx.lineTo(ex-nx*12-ny*6,ey-ny*12+nx*6);ctx.lineTo(ex-nx*12+ny*6,ey-ny*12-nx*6);ctx.closePath();ctx.fill();ctx.restore();
 }
 
+
 function syncAimFromSliders(){
   if(!humanTurn())return;
   aimAngle=sliderValueToAngle(Number(angleSlider.value)||0);
@@ -4712,8 +5053,7 @@ puzzleExitBtn?.addEventListener('click',()=>{
 });
 restartBtn.addEventListener('click',()=>{
   if(gameMode==='online'){
-    onlineSend('restart',{actionId:onlineMakeActionId()});
-    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
+    onlineRestartRoom();
     return;
   }
   if(gameMode==='training'&&phase!=='trainingEdit')restoreTrainingEditor();
@@ -4724,8 +5064,7 @@ againBtn.addEventListener('click',()=>{
   modal.classList.remove('show');
   if(gameMode==='training'&&trainingSnapshot)repeatTrainingSituation();
   else if(gameMode==='online'){
-    onlineSend('restart',{actionId:onlineMakeActionId()});
-    setTimeout(()=>{onlineDisconnect(true);showSetup()},120);
+    onlineRestartRoom();
   }
   else if(gameMode==='puzzle'){
     if(puzzleLastSuccess)startRandomPuzzle();
@@ -4739,6 +5078,7 @@ document.addEventListener('selectstart',e=>{if(!e.target.closest?.('input,textar
 document.addEventListener('dragstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('gesturestart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
+
 
 // Local input preferences; online simulation and room configuration remain authoritative.
 const settingsDialog=document.getElementById('settingsDialog');
@@ -4882,6 +5222,7 @@ window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
   if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });
+
 // Physics is tuned for 60 steps/second, independently of display refresh rate.
 let simulationLastTime=null,simulationRemainder=0;
 function loop(now=performance.now()){
@@ -4921,4 +5262,5 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 resize();renderFormatButtons();showSetup();loop();
+
 })();

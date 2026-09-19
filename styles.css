@@ -1,0 +1,1625 @@
+:root{
+  --bg:#071a36;
+  --bg-2:#0b244a;
+  --panel:#ffffff;
+  --panel-dark:rgba(8,27,57,.94);
+  --line:rgba(255,255,255,.22);
+  --text:#f7f9fd;
+  --ink:#0b1f3a;
+  --muted:#9fb1c8;
+  --muted-dark:#60728a;
+  --red:#d7263d;
+  --red-deep:#a91328;
+  --blue:#1d5fc3;
+  --blue-deep:#123f86;
+  --white:#ffffff;
+  --accent:#ffffff;
+  --shadow:0 12px 34px rgba(0,15,40,.24);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+input,textarea,[contenteditable="true"]{-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;touch-action:manipulation}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--text);touch-action:none;overscroll-behavior:none}
+body{
+  background:
+    radial-gradient(circle at 8% 0%,rgba(215,38,61,.28),transparent 27%),
+    radial-gradient(circle at 100% 100%,rgba(29,95,195,.34),transparent 32%),
+    linear-gradient(135deg,#071a36 0%,#0a2348 55%,#06152d 100%);
+}
+button{border:1px solid var(--line);border-radius:14px;color:var(--text);background:rgba(255,255,255,.08);font-family:inherit;font-weight:900;touch-action:none}
+button:active{transform:scale(.97)}
+button:disabled{opacity:.34}
+.hidden,[hidden]{display:none!important}
+
+/* ---------- Phone / touch layout ---------- */
+#app{
+  height:100dvh;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 112px;
+  grid-template-rows:46px minmax(0,1fr) auto;
+  gap:6px;
+  padding:calc(env(safe-area-inset-top) + 6px) 6px calc(env(safe-area-inset-bottom) + 6px);
+  position:relative;
+}
+.top{
+  grid-column:1;grid-row:1;
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+  min-width:0;height:46px;padding:5px 8px;
+  border:1px solid rgba(255,255,255,.52);border-radius:15px;
+  background:rgba(255,255,255,.96);color:var(--ink);
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.score{display:flex;gap:6px;align-items:center;min-width:0}
+.score.right{justify-content:flex-end}
+.badge{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+.badge.red{background:var(--red);box-shadow:0 0 0 3px rgba(215,38,61,.12)}
+.badge.blue{background:var(--blue);box-shadow:0 0 0 3px rgba(29,95,195,.12)}
+.name{font-size:8px;color:var(--muted-dark);font-weight:900;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:88px}
+.num{font-size:22px;line-height:1;font-weight:1000;color:var(--ink)}
+.center{text-align:center;min-width:74px}
+.round{font-size:8px;color:var(--muted-dark);font-weight:900;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.status{font-size:10px;font-weight:1000;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:104px}
+.onlineBadge{display:none;margin-top:1px;font-size:7px;font-weight:1000;letter-spacing:.09em;color:var(--blue)}
+.onlineBadge.show{display:block}
+
+.gameActions{
+  grid-column:2;grid-row:1;
+  display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:5px;
+  min-width:0;height:46px;
+}
+.gameActions button{height:46px;min-height:46px;padding:0 7px;border-radius:14px;box-shadow:var(--shadow)}
+.gameActions .declineTop{min-width:0;background:rgba(255,255,255,.96);color:var(--red-deep);border-color:rgba(215,38,61,.28);font-size:0}
+.gameActions .declineTop::after{content:"Отказ";font-size:9px;font-weight:1000;letter-spacing:.03em}
+.gameActions .newGameTop{min-width:44px;background:var(--blue);color:#fff;border-color:transparent;font-size:0}
+.gameActions .newGameTop::after{content:"↻";font-size:22px;line-height:1}
+.gameActions .puzzleExit{background:rgba(255,255,255,.96);color:var(--ink)}
+
+#stageWrap{
+  grid-column:1/-1;grid-row:2;
+  min-height:0;position:relative;overflow:hidden;
+  border-radius:18px;border:2px solid rgba(255,255,255,.86);
+  background:linear-gradient(160deg,#0b244a,#07162e);
+  box-shadow:0 16px 44px rgba(0,8,26,.32);
+}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hint{display:none!important}
+.toast{
+  position:absolute;top:9px;left:50%;transform:translateX(-50%) translateY(-5px);
+  padding:8px 12px;border-radius:999px;background:#fff;color:var(--ink);
+  border:1px solid rgba(7,26,54,.12);box-shadow:0 8px 24px rgba(0,12,38,.22);
+  font-size:11px;font-weight:1000;opacity:0;transition:.18s;z-index:6;white-space:nowrap;pointer-events:none
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.startNotice{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;opacity:0;transition:.18s;z-index:7;background:rgba(5,20,46,.12)}
+.startNotice.show{opacity:1;pointer-events:auto}
+.startNoticeCard{
+  width:min(86vw,330px);padding:15px 16px;border-radius:20px;
+  background:rgba(255,255,255,.97);border:1px solid rgba(255,255,255,.9);
+  box-shadow:0 18px 48px rgba(0,13,43,.30);text-align:center;color:var(--ink)
+}
+.startNoticeCard::before{content:"";display:block;width:66px;height:5px;margin:0 auto 11px;border-radius:999px;background:linear-gradient(90deg,var(--red) 0 48%,#fff 48% 52%,var(--blue) 52% 100%)}
+.startNoticeCard b{display:block;margin-bottom:5px;font-size:17px;font-weight:1000;color:var(--ink)}
+.startNoticeCard span{display:block;font-size:12px;line-height:1.35;color:#455b77}
+.startNoticeCard em{display:block;margin-top:9px;font-style:normal;font-size:10px;color:var(--blue-deep);font-weight:1000;letter-spacing:.04em}
+
+.aimPanel,.trainingPanel{
+  grid-column:1/-1;grid-row:3;
+  border:1px solid rgba(255,255,255,.34);border-radius:17px;
+  background:rgba(8,27,57,.95);box-shadow:0 -8px 26px rgba(0,11,35,.22);
+  backdrop-filter:blur(14px)
+}
+.aimPanel{height:88px;min-height:88px;padding:6px;overflow:hidden}
+.aimPanel.multiPlayerFormat{height:156px;min-height:156px}
+.aimPanel.screenButtons{height:126px;min-height:126px}
+.aimPanel.screenButtons.multiPlayerFormat{height:194px;min-height:194px}
+.compactAimGrid{
+  display:grid;grid-template-columns:minmax(0,1fr) 68px minmax(112px,.95fr);
+  gap:6px;height:76px;align-items:stretch
+}
+.aimLeft{min-width:0;display:grid;grid-template-rows:36px 36px;gap:4px;height:76px}
+.sliderBox{
+  min-width:0;height:36px;padding:0 6px;border:1px solid rgba(255,255,255,.18);border-radius:10px;
+  background:rgba(255,255,255,.07);overflow:hidden;display:grid;grid-template-columns:58px 1fr;align-items:center;gap:5px
+}
+.sliderBox label{color:#c8d4e5;font-size:7px;font-weight:1000;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.sliderBox input[type=range]{width:100%;height:18px;margin:0;-webkit-appearance:none;appearance:none;background:transparent}
+.sliderBox input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:999px;background:linear-gradient(90deg,var(--red),#fff,var(--blue))}
+.sliderBox input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:17px;height:17px;margin-top:-6px;border-radius:50%;background:#fff;border:2px solid var(--blue);box-shadow:0 1px 7px rgba(0,0,0,.25)}
+.sliderBox input[type=range]::-moz-range-track{height:5px;border-radius:999px;background:linear-gradient(90deg,var(--red),#fff,var(--blue))}
+.sliderBox input[type=range]::-moz-range-thumb{width:17px;height:17px;border-radius:50%;background:#fff;border:2px solid var(--blue)}
+#alternativeAim{height:76px;min-width:0;display:flex;align-items:center;justify-content:center;position:relative}
+.throwSlot{display:grid;place-items:stretch;height:76px}
+.throwBtn{
+  display:block!important;width:100%!important;min-width:0!important;height:76px!important;min-height:76px!important;
+  padding:0 4px!important;border:0!important;border-radius:11px!important;
+  background:linear-gradient(180deg,#eb3048,var(--red-deep))!important;color:#fff!important;
+  font-size:10px!important;line-height:1.05;letter-spacing:.03em;box-shadow:0 7px 18px rgba(163,19,40,.30)
+}
+.aimRight{min-width:0;display:grid;grid-template-rows:14px 1fr;gap:3px}
+.aimRightHead,.ballTypeRow{display:flex;align-items:center;justify-content:space-between;gap:5px;min-width:0;color:#aec0d8;font-size:8px;font-weight:1000;text-transform:uppercase;letter-spacing:.05em}
+.aimRightHead{padding:0 3px}
+.aimRightHead b,.ballTypeRow b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font-size:9px;text-transform:none;letter-spacing:0}
+.ballSelect{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,28px);gap:4px;height:60px;overflow:hidden}
+.ballChoice{min-width:0;height:28px;min-height:28px;padding:0 2px;border-radius:8px;font-size:8px;background:rgba(255,255,255,.07);color:#eaf1fb;border:1px solid rgba(255,255,255,.16)}
+.ballChoice.active{background:#fff;border-color:#fff;color:var(--blue-deep);box-shadow:0 0 0 2px rgba(29,95,195,.34)}
+.ballChoice.used{text-decoration:line-through;opacity:.24}.ballChoice:disabled{opacity:.2}
+.playerChoiceWrap{margin-bottom:7px}.aimPanel.multiPlayerFormat .playerChoiceWrap{height:68px;overflow:hidden}.aimPanel.multiPlayerFormat .playerChoiceWrap.hidden{display:block!important;height:68px;visibility:hidden;pointer-events:none}
+.playerChoices{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:6px}
+.playerChoices button{min-height:34px;padding:0 4px;border-radius:10px;font-size:9px;background:rgba(255,255,255,.07)}
+.playerChoices button.active{background:#fff;border-color:#fff;color:var(--blue-deep)}
+.playerChoices button.locked{border-color:rgba(255,255,255,.3)}
+.declineBtn{width:100%;min-height:36px;padding:0 12px;background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.2);font-size:11px}
+.controls{display:none}
+
+/* Direction controls */
+.joystick{width:60px;height:60px;flex-shrink:0;border-radius:50%;border:2px solid rgba(255,255,255,.58);background:linear-gradient(145deg,var(--blue-deep),#0b2f68);display:grid;place-items:center;touch-action:none;cursor:grab}
+.joystick[aria-disabled=true]{opacity:.35}
+#joystickKnob{display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:#fff;color:var(--blue-deep);pointer-events:none;font-size:20px;box-shadow:0 3px 12px rgba(0,0,0,.28)}
+.directionButtons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:34px 34px;gap:4px;width:100%;max-width:122px}
+.directionButtons button{height:34px;min-height:34px;padding:0;font-size:22px;border-radius:10px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.28);color:#fff}
+.directionButtons [data-aim=up]{grid-column:2;grid-row:1}.directionButtons [data-aim=left]{grid-column:1;grid-row:2}.directionButtons [data-aim=down]{grid-column:2;grid-row:2}.directionButtons [data-aim=right]{grid-column:3;grid-row:2}
+.directionButtons button:active{background:#fff;color:var(--blue-deep)}
+.directionButtons::before{content:"Прицел";grid-column:1;grid-row:1}.directionButtons::after{content:"Сила";grid-column:3;grid-row:1}
+.directionButtons::before,.directionButtons::after{align-self:center;text-align:center;font-size:8px;color:#aebfd6}
+.screenButtons .compactAimGrid{grid-template-columns:minmax(118px,1fr) 64px minmax(100px,.8fr);height:114px}
+.screenButtons #alternativeAim,.screenButtons .throwSlot{height:114px}
+.screenButtons .throwBtn{height:114px!important}
+.screenButtons .aimRight{align-self:center}
+#keyboardControl{font-size:10px;line-height:1.55;text-align:center;color:#d8e4f4}
+
+/* ---------- Menu / dialogs ---------- */
+.setupOverlay{
+  position:fixed;inset:0;z-index:100;display:none;place-items:start center;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;touch-action:pan-y;
+  padding:calc(env(safe-area-inset-top) + 16px) 14px calc(env(safe-area-inset-bottom) + 16px);
+  background:
+    radial-gradient(circle at 12% 10%,rgba(215,38,61,.34),transparent 28%),
+    radial-gradient(circle at 88% 90%,rgba(29,95,195,.40),transparent 34%),
+    linear-gradient(145deg,#071a36,#0d2b58 56%,#07162e);
+}
+.setupOverlay.show{display:grid}
+.setupBack{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 12px);z-index:6;min-height:40px;padding:0 13px;border-radius:12px;background:#fff;border:0;color:var(--ink);font-size:11px;box-shadow:var(--shadow)}
+.setupCard{
+  width:min(100%,410px);padding:22px;border-radius:26px;background:rgba(255,255,255,.98);
+  margin:auto 0;border:1px solid rgba(255,255,255,.9);box-shadow:0 26px 80px rgba(0,7,28,.42);text-align:center;color:var(--ink)
+}
+.setupCard::before{content:"";display:block;width:94px;height:6px;margin:0 auto 16px;border-radius:999px;background:linear-gradient(90deg,var(--red) 0 48%,#eef2f8 48% 52%,var(--blue) 52% 100%)}
+.setupCard h1{margin:0 0 7px;font-size:36px;letter-spacing:-.05em;color:var(--ink)}
+.setupCard h2{margin:0 0 8px;font-size:24px;color:var(--ink)}
+.setupCard p{margin:0 0 17px;color:var(--muted-dark);line-height:1.42}
+.modeButtons,.colourButtons{display:grid;gap:8px}
+.modeButtons button,.colourButtons button{min-height:52px;font-size:14px;border-radius:15px;background:#f1f4f8;color:var(--ink);border:1px solid #d8e0ea}
+.modeButtons .main{background:var(--red);color:#fff;border-color:transparent}
+.modeButtons .online{background:var(--blue);border-color:transparent;color:#fff}
+.modeButtons .training{background:#fff;border-color:#bfcbd9;color:var(--blue-deep)}
+.settingsButton{
+  position:relative!important;width:100%;min-height:52px!important;padding:11px 16px!important;
+  margin-top:5px!important;font-size:14px!important;font-weight:1000!important;
+  background:linear-gradient(90deg,#ffffff 0 72%,#edf4ff 100%)!important;
+  color:var(--blue-deep)!important;border:2px solid var(--blue)!important;border-radius:15px!important;
+  box-shadow:0 7px 18px rgba(29,95,195,.16)!important
+}
+.colourButtons{grid-template-columns:1fr 1fr}.colourButtons .pickRed{background:var(--red);border:0;color:#fff}.colourButtons .pickBlue{background:var(--blue);border:0;color:#fff}
+.coin{width:76px;height:76px;margin:0 auto 16px;border-radius:50%;background:linear-gradient(90deg,var(--red) 0 49%,#fff 49% 51%,var(--blue) 51% 100%);border:5px solid #fff;box-shadow:0 12px 35px rgba(0,0,0,.24)}
+.coin.spin{animation:coinSpin .75s cubic-bezier(.2,.7,.2,1)}
+@keyframes coinSpin{0%{transform:rotateY(0) rotateZ(0)}100%{transform:rotateY(1080deg) rotateZ(360deg)}}
+
+.formatTitle{margin:12px 0 8px;font-size:9px;color:var(--muted-dark);font-weight:1000;letter-spacing:.12em;text-transform:uppercase}
+.formatButtons{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:7px}
+.formatButtons button{min-height:43px;padding:0 6px;font-size:11px;border-radius:12px;background:#f1f4f8;color:var(--ink);border:1px solid #d8e0ea}
+.formatButtons button.selected{background:var(--blue);border-color:var(--blue);color:#fff}
+.setupSmall{font-size:10px!important;margin-top:11px!important}
+.orientationCard,.realismCard,.aiCard,.jackKit,.onlineCodeCard,.onlinePlayersCard,.allocPlayer,.kitRow{
+  margin-top:11px;padding:11px 12px;border-radius:15px;border:1px solid #d9e1eb;background:#f5f7fa;text-align:left;color:var(--ink)
+}
+.orientationHead,.aiHead span,.realismHead span{font-size:11px;font-weight:1000;color:var(--ink)}
+.orientationButtons{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
+.orientationButtons button,.realismToggle{min-height:40px;border-radius:11px;background:#fff;color:var(--ink);border:1px solid #cad4df;font-size:11px}
+.orientationButtons button.selected,.realismToggle.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.orientationInfo,.realismInfo,.aiInfo{margin:7px 0 0!important;color:var(--muted-dark)!important;font-size:10px!important;line-height:1.35}
+.realismHead,.aiHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.aiGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:8px}
+.aiGrid button{min-height:40px;padding:0 4px;border-radius:10px;background:#fff;color:var(--ink);border:1px solid #cad4df;font-size:10px}
+.aiGrid button.selected{background:var(--red);color:#fff;border-color:var(--red)}
+.kitButtons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:11px}
+.kitButtons button{min-height:48px;font-size:13px;background:#f1f4f8;color:var(--ink);border:1px solid #d8e0ea}
+.kitButtons .selected{background:var(--blue);color:#fff;border-color:var(--blue)}
+.jackKit{margin:0 0 11px}
+.jackKitHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}
+.jackKitHead span{font-size:10px;color:var(--muted-dark);font-weight:1000;text-transform:uppercase;letter-spacing:.06em}
+.jackHardnessGrid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px}
+.jackHardnessGrid button{min-height:34px;padding:0 2px;border-radius:9px;font-size:9px;background:#fff;color:var(--ink);border:1px solid #d2dbe6}
+.jackHardnessGrid button.selected{background:var(--blue);border-color:var(--blue);color:#fff}
+.jackKitNote{margin:7px 1px 0!important;font-size:9px!important;color:var(--muted-dark)!important;line-height:1.3!important}
+.kitGrid{display:grid;gap:7px;margin:12px 0}
+.kitRow{display:grid;grid-template-columns:1fr 38px 38px 38px;gap:6px;align-items:center;margin:0;padding:7px 8px}
+.kitRow .kitLabel{font-size:11px;font-weight:900}.kitRow button{min-height:34px;padding:0;font-size:17px;border-radius:9px;background:#fff;color:var(--ink);border:1px solid #d2dbe6}.kitCount{font-size:13px;font-weight:1000;text-align:center}
+.kitTotal{font-size:11px;color:var(--muted-dark);font-weight:900;margin:6px 0 11px}.kitTotal b{color:var(--ink)}
+.kitContinue,.allocationContinue{width:100%;min-height:48px;background:var(--red)!important;color:#fff!important;border:0!important}.kitContinue:disabled,.allocationContinue:disabled{opacity:.35!important}
+
+.onlineConnect{display:grid;gap:8px;margin-top:13px}.onlineConnect>button,.onlineReady{min-height:49px;border-radius:14px;font-size:13px}
+.onlineCreate{background:var(--blue)!important;color:#fff!important;border:0!important}
+.onlineJoinRow{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:7px}
+.onlineJoinRow input{min-width:0;height:47px;border-radius:13px;border:1px solid #cbd5e1;background:#f6f8fb;color:var(--ink);font:900 15px/1 inherit;text-transform:uppercase;text-align:center;letter-spacing:.14em;outline:none;padding:0 10px}
+.onlineJoinRow input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,95,195,.12)}
+.onlineLobby{display:grid;gap:9px;margin-top:13px}.onlineCodeCard,.onlinePlayersCard{margin:0}
+.onlineCodeHead{font-size:9px;color:var(--muted-dark);font-weight:1000;text-transform:uppercase;letter-spacing:.08em}
+.onlineCodeRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:5px}.onlineCodeRow b{font-size:23px;letter-spacing:.14em;color:var(--blue-deep)}.onlineCodeRow button{min-height:34px;padding:0 10px;border-radius:10px;font-size:9px;background:#fff;color:var(--ink);border:1px solid #cbd5e1}
+.onlinePlayer{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:31px;font-size:11px}.onlinePlayer span{color:var(--muted-dark);font-size:9px}.onlineDot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#8d9caf}.onlineDot.on{background:var(--blue);box-shadow:0 0 0 3px rgba(29,95,195,.12)}
+.onlineStatus{margin:0!important;font-size:10px!important;min-height:30px;color:var(--muted-dark)!important}
+.onlineReady{background:var(--red)!important;color:#fff!important;border:0!important}.onlineReady.ready{background:#fff!important;color:var(--blue-deep)!important;border:2px solid var(--blue)!important}.onlineNote{font-size:9px!important;margin:0!important;color:var(--muted-dark)!important}
+
+.allocationPlayers{display:grid;gap:7px;margin:12px 0}.allocPlayer{min-height:58px;margin:0}.allocPlayer.selected{border-color:var(--blue);box-shadow:0 0 0 2px rgba(29,95,195,.10)}.allocPlayerHead{display:flex;justify-content:space-between;align-items:center;gap:8px}.allocPlayerHead b{font-size:12px}.allocPlayerHead span{font-size:9px;color:var(--muted-dark);font-weight:900}.allocAssigned{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;min-height:20px}.allocChip{display:inline-grid;place-items:center;min-width:29px!important;min-height:23px!important;height:23px!important;padding:0 5px!important;border-radius:8px!important;background:#fff!important;color:var(--ink)!important;border:1px solid #d2dbe6!important;font-size:9px!important;font-weight:1000!important}
+.allocationLabel{text-align:left;font-size:9px;color:var(--muted-dark);font-weight:1000;text-transform:uppercase;letter-spacing:.07em;margin:7px 2px}
+.allocationBalls{display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:10px}.allocationBalls button{min-height:38px;padding:0 2px;border-radius:10px;font-size:9px;background:#f4f6f9;color:var(--ink);border:1px solid #d4dde8}.allocationBalls button.used{opacity:.18}.allocationActions{display:grid;grid-template-columns:1fr 1.5fr;gap:7px}.allocationActions button{min-height:45px;font-size:12px}
+
+.modal{position:absolute;inset:0;display:none;place-items:center;padding:20px;background:rgba(3,14,35,.72);backdrop-filter:blur(8px);z-index:10}.modal.show{display:grid}
+.card{width:min(100%,360px);padding:23px;border-radius:24px;background:#fff;border:1px solid rgba(255,255,255,.9);text-align:center;color:var(--ink);box-shadow:0 24px 70px rgba(0,10,35,.38)}
+.card h1{margin:0 0 8px;font-size:28px;letter-spacing:-.04em}.card p{margin:0 0 17px;color:var(--muted-dark);line-height:1.45}.card button{width:100%;min-height:48px;background:var(--red);color:#fff;border:0;font-size:13px}
+
+.trainingPanel{padding:8px;overflow:auto;max-height:196px}.trainingTitleRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px}.trainingTitleRow b{font-size:12px}.trainingTitleRow span{font-size:9px;color:#c4d2e5;font-weight:800}.trainingBack{flex:0 0 32px;width:32px;height:30px;padding:0;border-radius:9px;background:#fff;color:var(--ink)}
+.trainingTools{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:7px}.trainingTools button,.trainingHardness button,.trainingSide button{min-height:34px;padding:0 4px;border-radius:10px;font-size:9px;background:rgba(255,255,255,.08)}.trainingTools button.active,.trainingHardness button.active,.trainingSide button.active{background:#fff;color:var(--blue-deep);border-color:#fff}.trainingTools .redTool.active{background:var(--red);color:#fff;border-color:var(--red)}.trainingTools .blueTool.active{background:var(--blue);color:#fff;border-color:var(--blue)}
+.trainingHardness{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:7px}.trainingSide{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:7px}.trainingRemain{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:7px}.remainBox{display:grid;grid-template-columns:1fr 34px 34px;gap:5px;align-items:center;padding:5px 6px;border:1px solid rgba(255,255,255,.15);border-radius:11px;background:rgba(255,255,255,.06)}.remainBox span{font-size:9px;font-weight:900}.remainBox button{min-height:31px;padding:0;font-size:16px;border-radius:8px}.trainingActions{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:6px}.trainingActions button{min-height:38px;padding:0 6px;border-radius:10px;font-size:10px}.trainingActions .startTraining{background:var(--red);color:#fff;border:0}.trainingHelp{margin:7px 2px 0;color:#b6c5d9;font-size:8px;line-height:1.35;text-align:center}
+
+/* Settings */
+#settingsDialog{width:min(450px,calc(100vw - 24px));max-height:calc(100dvh - 32px);overflow:auto;touch-action:pan-y;border:1px solid rgba(255,255,255,.36);border-radius:22px;background:#fff;color:var(--ink);padding:18px;box-shadow:0 24px 70px rgba(0,10,35,.38)}
+#settingsDialog::backdrop{background:rgba(3,14,35,.78);backdrop-filter:blur(7px)}
+.settingsHeading{display:flex;align-items:center;justify-content:space-between;gap:12px}.settingsHeading h2{margin:0;font-size:22px}.settingsHeading button{min-width:44px;min-height:44px;background:var(--blue);color:#fff;border:0}
+.controlOptions{display:grid;gap:8px;margin-top:12px}.controlOptions button{min-height:44px;padding:10px;background:#f2f5f9;color:var(--ink);border:1px solid #d6dee8}.controlOptions [aria-pressed=true]{background:var(--blue);color:#fff;border-color:var(--blue)}
+
+
+/* ---------- Device-specific controls ---------- */
+.mobileControlHelp{display:none}
+.desktopControlHelp{display:block}
+
+@media(max-width:899px), (hover:none), (pointer:coarse){
+  /* This is the real mobile control set: no desktop keyboard/WASD choice. */
+  .desktopControlOnly,.desktopControlHelp{display:none!important}
+  .mobileControlHelp{display:block!important}
+
+  /* Large, finger-friendly sliders without stealing extra height from the court. */
+  .sliderBox{
+    grid-template-columns:70px minmax(0,1fr);
+    padding:0 8px;
+    gap:7px;
+  }
+  .sliderBox label{
+    font-size:9px;
+    letter-spacing:.025em;
+  }
+  .sliderBox input[type=range]{
+    height:32px;
+    touch-action:pan-x;
+  }
+  .sliderBox input[type=range]::-webkit-slider-runnable-track{
+    height:9px;
+    border-radius:999px;
+    background:linear-gradient(90deg,var(--red),#fff,var(--blue));
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.25);
+  }
+  .sliderBox input[type=range]::-webkit-slider-thumb{
+    width:28px;
+    height:28px;
+    margin-top:-9.5px;
+    border:3px solid var(--blue);
+    box-shadow:0 2px 9px rgba(0,0,0,.32),0 0 0 3px rgba(255,255,255,.18);
+  }
+  .sliderBox input[type=range]::-moz-range-track{
+    height:9px;
+    border-radius:999px;
+    background:linear-gradient(90deg,var(--red),#fff,var(--blue));
+  }
+  .sliderBox input[type=range]::-moz-range-thumb{
+    width:28px;
+    height:28px;
+    border:3px solid var(--blue);
+    box-shadow:0 2px 9px rgba(0,0,0,.32);
+  }
+
+  /* Settings sits visually apart as the final menu item. */
+  .modeButtons .settingsButton{
+    margin-top:7px!important;
+    min-height:54px!important;
+  }
+}
+
+/* Narrow phones */
+@media(max-width:370px){
+  #app{grid-template-columns:minmax(0,1fr) 101px;padding-left:4px;padding-right:4px;gap:4px}
+  .name{display:none}.center{min-width:68px}.status{font-size:9px;max-width:88px}.num{font-size:20px}
+  .gameActions{grid-template-columns:minmax(0,1fr) 40px;gap:4px}.gameActions button{padding:0 4px}
+  .compactAimGrid{grid-template-columns:minmax(0,1fr) 62px minmax(100px,.88fr);gap:4px}
+  .screenButtons .compactAimGrid{grid-template-columns:minmax(110px,1fr) 58px minmax(92px,.8fr)}
+}
+
+/* ---------- Laptop / desktop layout ---------- */
+@media(min-width:900px) and (hover:hover) and (pointer:fine){
+  .mobileControlHelp{display:none!important}
+  .desktopControlHelp{display:block!important}
+  .desktopControlOnly{display:block}
+}
+
+@media(min-width:900px) and (hover:hover) and (pointer:fine){
+  #app{
+    grid-template-columns:minmax(0,1fr) 250px;
+    grid-template-rows:60px minmax(0,1fr) auto;
+    gap:9px;padding:10px;
+  }
+  .top{
+    height:60px;border-radius:18px;padding:7px 16px;
+    grid-template-columns:1fr auto 1fr;
+  }
+  .badge{width:12px;height:12px}.name{font-size:10px;max-width:190px}.num{font-size:30px}
+  .center{min-width:180px}.round{font-size:10px}.status{font-size:14px;max-width:300px}.onlineBadge{font-size:8px}
+  .gameActions{height:60px;grid-template-columns:1fr 104px;gap:8px}
+  .gameActions button{height:60px;min-height:60px;border-radius:18px;font-size:12px!important}
+  .gameActions .declineTop{font-size:12px!important}.gameActions .declineTop::after{content:none}
+  .gameActions .newGameTop{font-size:11px!important}.gameActions .newGameTop::after{content:none}
+  #stageWrap{border-radius:22px;border-width:2px}
+  .aimPanel{height:116px;min-height:116px;padding:11px 13px;border-radius:20px}
+  .aimPanel.multiPlayerFormat{height:188px;min-height:188px}
+  .aimPanel.screenButtons{height:136px;min-height:136px}
+  .aimPanel.screenButtons.multiPlayerFormat{height:208px;min-height:208px}
+  .compactAimGrid{grid-template-columns:minmax(300px,1fr) 170px minmax(370px,1.15fr);gap:12px;height:92px}
+  .aimLeft{height:92px;grid-template-columns:1fr 1fr;grid-template-rows:1fr;gap:10px}
+  .sliderBox{height:92px;grid-template-columns:88px 1fr;border-radius:14px;padding:0 13px}.sliderBox label{font-size:9px}
+  #alternativeAim{height:92px}.joystick{width:78px;height:78px}#joystickKnob{width:38px;height:38px;font-size:24px}
+  .throwSlot{height:92px}.throwBtn{height:92px!important;font-size:16px!important;border-radius:15px!important}
+  .aimRight{grid-template-rows:20px 1fr}.aimRightHead{font-size:10px}.aimRightHead b{font-size:12px}
+  .ballSelect{grid-template-columns:repeat(6,1fr);grid-template-rows:52px;height:52px;gap:6px}.ballChoice{height:52px;min-height:52px;border-radius:12px;font-size:10px}
+  .directionButtons{max-width:190px;grid-template-rows:40px 40px;gap:5px}.directionButtons button{height:40px;min-height:40px;font-size:24px}.directionButtons::before,.directionButtons::after{font-size:9px}
+  .screenButtons .compactAimGrid{grid-template-columns:minmax(300px,1fr) 170px minmax(370px,1.15fr);height:112px}
+  .screenButtons #alternativeAim,.screenButtons .throwSlot{height:112px}.screenButtons .throwBtn{height:112px!important}
+  #keyboardControl{font-size:13px;line-height:1.7}
+  .trainingPanel{height:auto;max-height:220px;padding:12px 14px;border-radius:20px}
+  .setupOverlay{padding:26px}
+  .setupCard{width:min(520px,100%);padding:30px;border-radius:30px}.setupCard h1{font-size:44px}.setupCard h2{font-size:28px}
+  #settingsDialog{width:min(520px,calc(100vw - 40px));padding:22px}
+}
+
+/* Touch tablets */
+@media(min-width:700px) and (hover:none){
+  #app{grid-template-columns:minmax(0,1fr) 150px;grid-template-rows:54px minmax(0,1fr) auto;padding:8px;gap:8px}
+  .top{height:54px;padding:6px 12px}.gameActions{height:54px;grid-template-columns:1fr 50px}.gameActions button{height:54px;min-height:54px}
+  .aimPanel{height:100px;min-height:100px;padding:8px}.compactAimGrid{grid-template-columns:minmax(0,1fr) 84px minmax(170px,.95fr);height:84px}
+  #alternativeAim,.throwSlot{height:84px}.throwBtn{height:84px!important}.joystick{width:68px;height:68px}
+  .ballSelect{grid-template-columns:repeat(6,1fr);grid-template-rows:54px;height:54px}.ballChoice{height:54px;min-height:54px}
+}
+
+
+.settingsLast{
+  display:block!important;
+  width:100%!important;
+  margin-top:16px!important;
+  margin-bottom:2px!important;
+}
+@media(max-width:899px), (hover:none), (pointer:coarse){
+  .settingsLast{
+    margin-top:18px!important;
+    min-height:56px!important;
+    font-size:15px!important;
+  }
+}
+
+
+/* Hard device split, set before first paint by index.html. */
+html.mobile-ui .desktopControlOnly,
+html.mobile-ui .desktopControlHelp{
+  display:none!important;
+}
+html.mobile-ui .mobileControlHelp{
+  display:block!important;
+}
+html.desktop-ui .desktopControlOnly{
+  display:block!important;
+}
+html.desktop-ui .desktopControlHelp{
+  display:block!important;
+}
+html.desktop-ui .mobileControlHelp{
+  display:none!important;
+}
+
+/* Keep the keyboard choice impossible to reveal through inherited styles on touch UI. */
+html.mobile-ui [data-control-mode="keyboard"]{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+
+
+/* =========================================================
+   HARD DESKTOP SPLIT
+   The desktop layout no longer depends on hover/pointer media queries.
+   index.html sets html.desktop-ui at viewport width >= 900px.
+   ========================================================= */
+html.desktop-ui #app{
+  grid-template-columns:minmax(0,1fr) 250px!important;
+  grid-template-rows:60px minmax(0,1fr) auto!important;
+  gap:9px!important;
+  padding:10px!important;
+}
+html.desktop-ui .top{
+  grid-column:1!important;
+  grid-row:1!important;
+  height:60px!important;
+  min-height:60px!important;
+  max-height:60px!important;
+  border-radius:18px!important;
+  padding:7px 16px!important;
+  grid-template-columns:1fr auto 1fr!important;
+}
+html.desktop-ui .badge{width:12px!important;height:12px!important}
+html.desktop-ui .name{display:block!important;font-size:10px!important;max-width:190px!important}
+html.desktop-ui .num{font-size:30px!important}
+html.desktop-ui .center{min-width:180px!important}
+html.desktop-ui .round{font-size:10px!important}
+html.desktop-ui .status{font-size:14px!important;max-width:300px!important}
+html.desktop-ui .onlineBadge{font-size:8px!important}
+
+html.desktop-ui .gameActions{
+  grid-column:2!important;
+  grid-row:1!important;
+  height:60px!important;
+  min-height:60px!important;
+  grid-template-columns:1fr 104px!important;
+  gap:8px!important;
+}
+html.desktop-ui .gameActions button{
+  height:60px!important;
+  min-height:60px!important;
+  border-radius:18px!important;
+  font-size:12px!important;
+  padding:0 12px!important;
+}
+html.desktop-ui .gameActions .declineTop{
+  font-size:12px!important;
+}
+html.desktop-ui .gameActions .declineTop::after{
+  content:none!important;
+}
+html.desktop-ui .gameActions .newGameTop{
+  font-size:11px!important;
+}
+html.desktop-ui .gameActions .newGameTop::after{
+  content:none!important;
+}
+
+html.desktop-ui #stageWrap{
+  grid-column:1/-1!important;
+  grid-row:2!important;
+  border-radius:22px!important;
+  border-width:2px!important;
+}
+
+html.desktop-ui .aimPanel{
+  grid-column:1/-1!important;
+  grid-row:3!important;
+  height:116px!important;
+  min-height:116px!important;
+  max-height:116px!important;
+  padding:11px 13px!important;
+  border-radius:20px!important;
+}
+html.desktop-ui .aimPanel.multiPlayerFormat{
+  height:188px!important;
+  min-height:188px!important;
+  max-height:188px!important;
+}
+html.desktop-ui .aimPanel.screenButtons{
+  height:136px!important;
+  min-height:136px!important;
+  max-height:136px!important;
+}
+html.desktop-ui .aimPanel.screenButtons.multiPlayerFormat{
+  height:208px!important;
+  min-height:208px!important;
+  max-height:208px!important;
+}
+
+html.desktop-ui .compactAimGrid{
+  grid-template-columns:minmax(300px,1fr) 170px minmax(370px,1.15fr)!important;
+  gap:12px!important;
+  height:92px!important;
+}
+html.desktop-ui .aimLeft{
+  height:92px!important;
+  grid-template-columns:1fr 1fr!important;
+  grid-template-rows:1fr!important;
+  gap:10px!important;
+}
+html.desktop-ui .sliderBox{
+  height:92px!important;
+  grid-template-columns:88px 1fr!important;
+  border-radius:14px!important;
+  padding:0 13px!important;
+}
+html.desktop-ui .sliderBox label{
+  font-size:9px!important;
+}
+html.desktop-ui .sliderBox input[type=range]{
+  height:28px!important;
+}
+html.desktop-ui #alternativeAim{
+  height:92px!important;
+}
+html.desktop-ui .joystick{
+  width:78px!important;
+  height:78px!important;
+}
+html.desktop-ui #joystickKnob{
+  width:38px!important;
+  height:38px!important;
+  font-size:24px!important;
+}
+html.desktop-ui .throwSlot{
+  height:92px!important;
+}
+html.desktop-ui .throwBtn{
+  height:92px!important;
+  min-height:92px!important;
+  font-size:16px!important;
+  border-radius:15px!important;
+}
+html.desktop-ui .aimRight{
+  grid-template-rows:20px 1fr!important;
+}
+html.desktop-ui .aimRightHead{
+  font-size:10px!important;
+}
+html.desktop-ui .aimRightHead b{
+  font-size:12px!important;
+}
+html.desktop-ui .ballSelect{
+  grid-template-columns:repeat(6,1fr)!important;
+  grid-template-rows:52px!important;
+  height:52px!important;
+  min-height:52px!important;
+  gap:6px!important;
+}
+html.desktop-ui .ballChoice{
+  height:52px!important;
+  min-height:52px!important;
+  border-radius:12px!important;
+  font-size:10px!important;
+}
+
+html.desktop-ui .directionButtons{
+  max-width:190px!important;
+  grid-template-rows:40px 40px!important;
+  gap:5px!important;
+}
+html.desktop-ui .directionButtons button{
+  height:40px!important;
+  min-height:40px!important;
+  font-size:24px!important;
+}
+html.desktop-ui .directionButtons::before,
+html.desktop-ui .directionButtons::after{
+  font-size:9px!important;
+}
+html.desktop-ui .screenButtons .compactAimGrid{
+  grid-template-columns:minmax(300px,1fr) 170px minmax(370px,1.15fr)!important;
+  height:112px!important;
+}
+html.desktop-ui .screenButtons #alternativeAim,
+html.desktop-ui .screenButtons .throwSlot{
+  height:112px!important;
+}
+html.desktop-ui .screenButtons .throwBtn{
+  height:112px!important;
+  min-height:112px!important;
+}
+html.desktop-ui #keyboardControl{
+  font-size:13px!important;
+  line-height:1.7!important;
+}
+
+/* Desktop settings/menu proportions. */
+html.desktop-ui .setupOverlay{
+  padding:26px!important;
+}
+html.desktop-ui .setupCard{
+  width:min(520px,100%)!important;
+  padding:30px!important;
+  border-radius:30px!important;
+}
+html.desktop-ui .setupCard h1{
+  font-size:44px!important;
+}
+html.desktop-ui .setupCard h2{
+  font-size:28px!important;
+}
+html.desktop-ui #settingsDialog{
+  width:min(520px,calc(100vw - 40px))!important;
+  padding:22px!important;
+}
+
+/* Desktop must expose the keyboard option. */
+html.desktop-ui [data-control-mode="keyboard"]{
+  display:block!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+}
+
+
+/* =========================================================
+   MOBILE SLIDER COMFORT PATCH
+   Bigger touch targets for phone users.
+   ========================================================= */
+html.mobile-ui .aimPanel{
+  height:102px!important;
+  min-height:102px!important;
+  max-height:102px!important;
+  padding:7px!important;
+}
+html.mobile-ui .aimPanel.multiPlayerFormat{
+  height:170px!important;
+  min-height:170px!important;
+  max-height:170px!important;
+}
+html.mobile-ui .aimPanel.screenButtons{
+  height:138px!important;
+  min-height:138px!important;
+  max-height:138px!important;
+}
+html.mobile-ui .aimPanel.screenButtons.multiPlayerFormat{
+  height:206px!important;
+  min-height:206px!important;
+  max-height:206px!important;
+}
+html.mobile-ui .compactAimGrid{
+  height:88px!important;
+  grid-template-columns:minmax(0,1fr) 68px minmax(112px,.95fr)!important;
+}
+html.mobile-ui .aimLeft{
+  height:88px!important;
+  grid-template-rows:42px 42px!important;
+  gap:4px!important;
+}
+html.mobile-ui .sliderBox{
+  height:42px!important;
+  min-height:42px!important;
+  grid-template-columns:72px minmax(0,1fr)!important;
+  padding:0 9px!important;
+  gap:8px!important;
+  border-radius:11px!important;
+}
+html.mobile-ui .sliderBox label{
+  font-size:9px!important;
+  line-height:1.1!important;
+}
+html.mobile-ui .sliderBox input[type=range]{
+  height:36px!important;
+  min-height:36px!important;
+  margin:0!important;
+  touch-action:pan-x!important;
+}
+html.mobile-ui .sliderBox input[type=range]::-webkit-slider-runnable-track{
+  height:10px!important;
+  border-radius:999px!important;
+}
+html.mobile-ui .sliderBox input[type=range]::-webkit-slider-thumb{
+  width:30px!important;
+  height:30px!important;
+  margin-top:-10px!important;
+  border-width:3px!important;
+}
+html.mobile-ui .sliderBox input[type=range]::-moz-range-track{
+  height:10px!important;
+  border-radius:999px!important;
+}
+html.mobile-ui .sliderBox input[type=range]::-moz-range-thumb{
+  width:30px!important;
+  height:30px!important;
+  border-width:3px!important;
+}
+
+/* keep throw button aligned to the new slider height */
+html.mobile-ui #alternativeAim,
+html.mobile-ui .throwSlot{
+  height:88px!important;
+}
+html.mobile-ui .throwBtn{
+  height:88px!important;
+  min-height:88px!important;
+}
+
+/* very small phones still need a bit more room */
+@media(max-width:370px){
+  html.mobile-ui .aimPanel{
+    height:106px!important;
+    min-height:106px!important;
+    max-height:106px!important;
+  }
+  html.mobile-ui .compactAimGrid{
+    height:92px!important;
+  }
+  html.mobile-ui .aimLeft{
+    height:92px!important;
+    grid-template-rows:44px 44px!important;
+  }
+  html.mobile-ui .sliderBox{
+    height:44px!important;
+    min-height:44px!important;
+    grid-template-columns:68px minmax(0,1fr)!important;
+  }
+}
+
+
+/* =========================================================
+   MOBILE FULL-WIDTH SLIDERS
+   Keep the slider system, but give aiming the full screen width.
+   Only applies when "Ползунки" is the selected control mode.
+   ========================================================= */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])){
+  height:164px!important;
+  min-height:164px!important;
+  max-height:164px!important;
+  padding:7px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .compactAimGrid{
+  display:grid!important;
+  grid-template-columns:76px minmax(0,1fr)!important;
+  grid-template-rows:92px 58px!important;
+  gap:6px!important;
+  height:150px!important;
+  align-items:stretch!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) #legacySliders{
+  grid-column:1/-1!important;
+  grid-row:1!important;
+  width:100%!important;
+  height:92px!important;
+  display:grid!important;
+  grid-template-rows:44px 44px!important;
+  gap:4px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+  width:100%!important;
+  height:44px!important;
+  min-height:44px!important;
+  grid-template-columns:92px minmax(0,1fr)!important;
+  padding:0 12px!important;
+  gap:10px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+  font-size:10px!important;
+  letter-spacing:.035em!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]{
+  width:100%!important;
+  min-width:0!important;
+  height:38px!important;
+  min-height:38px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-runnable-track{
+  height:10px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-thumb{
+  width:30px!important;
+  height:30px!important;
+  margin-top:-10px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwSlot{
+  grid-column:1!important;
+  grid-row:2!important;
+  height:58px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwBtn{
+  width:100%!important;
+  height:58px!important;
+  min-height:58px!important;
+  font-size:11px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRight{
+  grid-column:2!important;
+  grid-row:2!important;
+  min-width:0!important;
+  height:58px!important;
+  display:grid!important;
+  grid-template-rows:14px 40px!important;
+  gap:4px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballSelect{
+  display:grid!important;
+  grid-template-columns:repeat(6,minmax(0,1fr))!important;
+  grid-template-rows:40px!important;
+  gap:4px!important;
+  height:40px!important;
+  min-height:40px!important;
+  max-height:40px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
+  height:40px!important;
+  min-height:40px!important;
+  font-size:8px!important;
+}
+
+/* On very narrow phones keep the full-width track and shrink only the label. */
+@media(max-width:370px){
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+    grid-template-columns:82px minmax(0,1fr)!important;
+    padding:0 9px!important;
+    gap:7px!important;
+  }
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+    font-size:9px!important;
+  }
+}
+
+
+/* =========================================================
+   DESKTOP: ORIGINAL SLIDER CONTROL LAYOUT
+   Restores the first desktop version exactly for slider mode.
+   Mobile full-width sliders remain unchanged.
+   ========================================================= */
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])){
+  height:116px!important;
+  min-height:116px!important;
+  max-height:116px!important;
+  padding:11px 13px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .compactAimGrid{
+  display:grid!important;
+  grid-template-columns:minmax(300px,1fr) 170px minmax(370px,1.15fr)!important;
+  grid-template-rows:92px!important;
+  gap:12px!important;
+  height:92px!important;
+  align-items:stretch!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) #legacySliders{
+  grid-column:1!important;
+  grid-row:1!important;
+  display:grid!important;
+  grid-template-columns:1fr 1fr!important;
+  grid-template-rows:1fr!important;
+  gap:10px!important;
+  width:auto!important;
+  height:92px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+  width:auto!important;
+  height:92px!important;
+  min-height:92px!important;
+  padding:0 13px!important;
+  grid-template-columns:88px minmax(0,1fr)!important;
+  gap:5px!important;
+  border-radius:14px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+  font-size:9px!important;
+  letter-spacing:.045em!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]{
+  width:100%!important;
+  height:28px!important;
+  min-height:0!important;
+  margin:0!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-runnable-track{
+  height:5px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-thumb{
+  width:17px!important;
+  height:17px!important;
+  margin-top:-6px!important;
+  border-width:2px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-track{
+  height:5px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-thumb{
+  width:17px!important;
+  height:17px!important;
+  border-width:2px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .throwSlot{
+  grid-column:2!important;
+  grid-row:1!important;
+  height:92px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .throwBtn{
+  height:92px!important;
+  min-height:92px!important;
+  font-size:16px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRight{
+  grid-column:3!important;
+  grid-row:1!important;
+  height:92px!important;
+  grid-template-rows:20px 1fr!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .ballSelect{
+  grid-template-columns:repeat(6,1fr)!important;
+  grid-template-rows:52px!important;
+  height:52px!important;
+  min-height:52px!important;
+  max-height:52px!important;
+  gap:6px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
+  height:52px!important;
+  min-height:52px!important;
+  font-size:10px!important;
+}
+
+
+/* =========================================================
+   DESKTOP v10
+   Compact overall UI + long wide sliders.
+   Mobile layout remains unchanged.
+   ========================================================= */
+html.desktop-ui #app{
+  grid-template-columns:minmax(0,1fr) 220px!important;
+  grid-template-rows:57px minmax(0,1fr) 86px!important;
+  gap:7px!important;
+  padding:7px 8px!important;
+}
+
+html.desktop-ui .top{
+  grid-column:1!important;
+  grid-row:1!important;
+  height:57px!important;
+  min-height:57px!important;
+  max-height:57px!important;
+  padding:6px 10px!important;
+  border-radius:18px!important;
+}
+html.desktop-ui .badge{width:11px!important;height:11px!important}
+html.desktop-ui .name{font-size:10px!important;max-width:160px!important}
+html.desktop-ui .num{font-size:25px!important}
+html.desktop-ui .center{min-width:116px!important}
+html.desktop-ui .round{font-size:9px!important}
+html.desktop-ui .status{font-size:12px!important;max-width:220px!important}
+html.desktop-ui .onlineBadge{font-size:8px!important}
+
+html.desktop-ui .gameActions{
+  grid-column:2!important;
+  grid-row:1!important;
+  height:57px!important;
+  min-height:57px!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:7px!important;
+}
+html.desktop-ui .gameActions button{
+  height:39px!important;
+  min-height:39px!important;
+  max-height:39px!important;
+  border-radius:13px!important;
+  padding:0 10px!important;
+  font-size:11px!important;
+}
+html.desktop-ui .gameActions .declineTop{
+  flex:1 1 auto!important;
+  min-width:0!important;
+}
+html.desktop-ui .gameActions .newGameTop{
+  flex:0 0 82px!important;
+  font-size:10px!important;
+}
+html.desktop-ui .gameActions .declineTop::after,
+html.desktop-ui .gameActions .newGameTop::after{
+  content:none!important;
+}
+
+html.desktop-ui #stageWrap{
+  grid-column:1/-1!important;
+  grid-row:2!important;
+  border-radius:20px!important;
+}
+
+/* Compact lower panel */
+html.desktop-ui .aimPanel{
+  grid-column:1/-1!important;
+  grid-row:3!important;
+  height:86px!important;
+  min-height:86px!important;
+  max-height:86px!important;
+  padding:6px!important;
+  border-radius:18px!important;
+}
+html.desktop-ui .aimPanel.multiPlayerFormat{
+  height:154px!important;
+  min-height:154px!important;
+  max-height:154px!important;
+}
+
+/* Long slider area, compact throw button, compact ball area */
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .compactAimGrid{
+  display:grid!important;
+  grid-template-columns:minmax(520px,1.55fr) 96px minmax(300px,.78fr)!important;
+  grid-template-rows:74px!important;
+  gap:7px!important;
+  height:74px!important;
+  align-items:stretch!important;
+}
+
+/* Two long sliders stacked vertically */
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) #legacySliders{
+  grid-column:1!important;
+  grid-row:1!important;
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  grid-template-rows:35px 35px!important;
+  gap:4px!important;
+  width:100%!important;
+  height:74px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+  width:100%!important;
+  height:35px!important;
+  min-height:35px!important;
+  padding:0 8px!important;
+  grid-template-columns:82px minmax(0,1fr)!important;
+  gap:8px!important;
+  border-radius:10px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+  font-size:8px!important;
+  letter-spacing:.045em!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]{
+  width:100%!important;
+  min-width:0!important;
+  height:20px!important;
+  min-height:20px!important;
+  margin:0!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-runnable-track{
+  height:6px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-thumb{
+  width:18px!important;
+  height:18px!important;
+  margin-top:-6px!important;
+  border-width:0!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-track{
+  height:6px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-thumb{
+  width:18px!important;
+  height:18px!important;
+  border-width:0!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .throwSlot{
+  grid-column:2!important;
+  grid-row:1!important;
+  height:74px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .throwBtn{
+  width:100%!important;
+  height:74px!important;
+  min-height:74px!important;
+  font-size:13px!important;
+  border-radius:11px!important;
+}
+
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRight{
+  grid-column:3!important;
+  grid-row:1!important;
+  height:74px!important;
+  grid-template-rows:14px 1fr!important;
+  gap:3px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRightHead{
+  font-size:9px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRightHead b{
+  font-size:10px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .ballSelect{
+  grid-template-columns:repeat(3,1fr)!important;
+  grid-template-rows:repeat(2,28px)!important;
+  height:60px!important;
+  min-height:60px!important;
+  max-height:60px!important;
+  gap:4px!important;
+}
+html.desktop-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
+  height:28px!important;
+  min-height:28px!important;
+  border-radius:9px!important;
+  font-size:9px!important;
+}
+
+/* Keep other desktop control modes compact as well */
+html.desktop-ui .compactAimGrid{
+  height:74px!important;
+}
+html.desktop-ui #alternativeAim,
+html.desktop-ui .throwSlot{
+  height:74px!important;
+}
+html.desktop-ui .joystick{
+  width:58px!important;
+  height:58px!important;
+}
+html.desktop-ui #joystickKnob{
+  width:30px!important;
+  height:30px!important;
+  font-size:22px!important;
+}
+html.desktop-ui #keyboardControl{
+  font-size:11px!important;
+  line-height:1.6!important;
+}
+
+
+/* =========================================================
+   DESKTOP v12 — ONLY SMALLER BUTTONS
+   Mobile is untouched. Field/sliders/layout stay as in v10.
+   ========================================================= */
+
+/* Top action buttons */
+html.desktop-ui .gameActions{
+  align-items:center!important;
+}
+html.desktop-ui .gameActions button{
+  height:36px!important;
+  min-height:36px!important;
+  max-height:36px!important;
+  padding:0 10px!important;
+  border-radius:11px!important;
+  font-size:10px!important;
+}
+html.desktop-ui .gameActions .newGameTop{
+  flex:0 0 78px!important;
+  font-size:10px!important;
+}
+
+/* Throw button */
+html.desktop-ui .throwBtn{
+  font-size:12px!important;
+  border-radius:10px!important;
+}
+
+/* Ball selection buttons */
+html.desktop-ui .ballChoice{
+  border-radius:8px!important;
+  font-size:8px!important;
+}
+
+/* Main menu buttons */
+html.desktop-ui .modeButtons button,
+html.desktop-ui .colourButtons button{
+  min-height:42px!important;
+  height:42px!important;
+  border-radius:12px!important;
+  font-size:12px!important;
+}
+html.desktop-ui .settingsButton{
+  min-height:42px!important;
+  height:42px!important;
+  padding:0 14px!important;
+  border-radius:12px!important;
+  font-size:12px!important;
+}
+
+/* Match format buttons */
+html.desktop-ui .formatButtons button{
+  min-height:36px!important;
+  height:36px!important;
+  border-radius:10px!important;
+  font-size:10px!important;
+}
+
+/* Orientation / realism / AI */
+html.desktop-ui .orientationButtons button,
+html.desktop-ui .realismToggle{
+  min-height:34px!important;
+  height:34px!important;
+  border-radius:9px!important;
+  font-size:10px!important;
+}
+html.desktop-ui .aiGrid button{
+  min-height:34px!important;
+  height:34px!important;
+  border-radius:9px!important;
+  font-size:9px!important;
+}
+
+/* Kit and allocation buttons */
+html.desktop-ui .kitButtons button{
+  min-height:40px!important;
+  height:40px!important;
+  font-size:11px!important;
+}
+html.desktop-ui .jackHardnessGrid button{
+  min-height:30px!important;
+  height:30px!important;
+  border-radius:8px!important;
+  font-size:9px!important;
+}
+html.desktop-ui .allocationActions button{
+  min-height:38px!important;
+  height:38px!important;
+  font-size:11px!important;
+}
+
+/* Online setup buttons */
+html.desktop-ui .onlineConnect > button,
+html.desktop-ui .onlineReady{
+  min-height:40px!important;
+  height:40px!important;
+  border-radius:11px!important;
+  font-size:11px!important;
+}
+html.desktop-ui .onlineJoinRow input{
+  height:40px!important;
+}
+html.desktop-ui .onlineJoinRow button{
+  height:40px!important;
+  min-height:40px!important;
+  border-radius:10px!important;
+  font-size:10px!important;
+}
+
+/* Settings dialog choices */
+html.desktop-ui .controlOptions button{
+  min-height:36px!important;
+  height:36px!important;
+  padding:0 10px!important;
+  border-radius:10px!important;
+  font-size:11px!important;
+}
+
+/* Training buttons */
+html.desktop-ui .trainingTools button,
+html.desktop-ui .trainingHardness button,
+html.desktop-ui .trainingSide button{
+  min-height:30px!important;
+  height:30px!important;
+  border-radius:9px!important;
+  font-size:9px!important;
+}
+html.desktop-ui .trainingActions button{
+  min-height:34px!important;
+  height:34px!important;
+  border-radius:9px!important;
+  font-size:10px!important;
+}
+
+
+/* =========================================================
+   MOBILE COMPACT GAMEPLAY UI
+   Smaller buttons / bars = more vertical room for the court.
+   Wide full-screen sliders are preserved.
+   Desktop is untouched.
+   ========================================================= */
+
+html.mobile-ui #app{
+  grid-template-columns:minmax(0,1fr) 96px!important;
+  grid-template-rows:40px minmax(0,1fr) auto!important;
+  gap:5px!important;
+  padding:
+    calc(env(safe-area-inset-top) + 4px)
+    5px
+    calc(env(safe-area-inset-bottom) + 4px)!important;
+}
+
+/* Compact score/header */
+html.mobile-ui .top{
+  height:40px!important;
+  min-height:40px!important;
+  max-height:40px!important;
+  padding:3px 7px!important;
+  border-radius:12px!important;
+}
+html.mobile-ui .badge{
+  width:8px!important;
+  height:8px!important;
+}
+html.mobile-ui .num{
+  font-size:19px!important;
+}
+html.mobile-ui .name{
+  font-size:7px!important;
+  max-width:76px!important;
+}
+html.mobile-ui .center{
+  min-width:62px!important;
+}
+html.mobile-ui .round{
+  font-size:7px!important;
+}
+html.mobile-ui .status{
+  font-size:9px!important;
+  max-width:92px!important;
+}
+
+/* Compact top action buttons */
+html.mobile-ui .gameActions{
+  height:40px!important;
+  min-height:40px!important;
+  grid-template-columns:minmax(0,1fr) 38px!important;
+  gap:4px!important;
+}
+html.mobile-ui .gameActions button{
+  height:40px!important;
+  min-height:40px!important;
+  max-height:40px!important;
+  padding:0 5px!important;
+  border-radius:11px!important;
+}
+html.mobile-ui .gameActions .declineTop::after{
+  font-size:8px!important;
+}
+html.mobile-ui .gameActions .newGameTop{
+  min-width:38px!important;
+}
+html.mobile-ui .gameActions .newGameTop::after{
+  font-size:19px!important;
+}
+
+/* Keep the two wide sliders, but make the whole lower panel shorter. */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])){
+  height:144px!important;
+  min-height:144px!important;
+  max-height:144px!important;
+  padding:6px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .compactAimGrid{
+  grid-template-columns:64px minmax(0,1fr)!important;
+  grid-template-rows:88px 44px!important;
+  gap:4px!important;
+  height:132px!important;
+}
+
+/* Slider rows stay large enough for precise touch. */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) #legacySliders{
+  height:88px!important;
+  grid-template-rows:42px 42px!important;
+  gap:4px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+  height:42px!important;
+  min-height:42px!important;
+  grid-template-columns:88px minmax(0,1fr)!important;
+  padding:0 10px!important;
+  gap:8px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]{
+  height:36px!important;
+  min-height:36px!important;
+}
+
+/* Smaller throw button below sliders */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwSlot{
+  height:44px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwBtn{
+  height:44px!important;
+  min-height:44px!important;
+  border-radius:9px!important;
+  font-size:9px!important;
+  padding:0 2px!important;
+}
+
+/* Smaller ball buttons below sliders */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRight{
+  height:44px!important;
+  grid-template-rows:11px 31px!important;
+  gap:2px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRightHead{
+  font-size:7px!important;
+  line-height:1!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRightHead b{
+  font-size:8px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballSelect{
+  grid-template-columns:repeat(6,minmax(0,1fr))!important;
+  grid-template-rows:31px!important;
+  height:31px!important;
+  min-height:31px!important;
+  max-height:31px!important;
+  gap:3px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
+  height:31px!important;
+  min-height:31px!important;
+  border-radius:7px!important;
+  font-size:7px!important;
+  padding:0 1px!important;
+}
+
+/* Other mobile control modes also use smaller buttons/panel. */
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))){
+  height:82px!important;
+  min-height:82px!important;
+  max-height:82px!important;
+  padding:5px!important;
+}
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) .compactAimGrid{
+  height:70px!important;
+  grid-template-columns:minmax(0,1fr) 58px minmax(104px,.9fr)!important;
+  gap:4px!important;
+}
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) #alternativeAim,
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) .throwSlot{
+  height:70px!important;
+}
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) .throwBtn{
+  height:70px!important;
+  min-height:70px!important;
+  font-size:9px!important;
+}
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) .joystick{
+  width:54px!important;
+  height:54px!important;
+}
+html.mobile-ui .aimPanel:not(:has(#legacySliders:not([hidden]))) #joystickKnob{
+  width:28px!important;
+  height:28px!important;
+}
+
+/* Main menu buttons: slightly shorter on phones too. */
+html.mobile-ui .modeButtons button,
+html.mobile-ui .colourButtons button{
+  min-height:44px!important;
+  height:44px!important;
+  border-radius:12px!important;
+  font-size:12px!important;
+}
+html.mobile-ui .settingsButton{
+  min-height:44px!important;
+  height:44px!important;
+  font-size:12px!important;
+}
+html.mobile-ui .formatButtons button{
+  min-height:36px!important;
+  height:36px!important;
+  font-size:10px!important;
+}
+
+/* Extra narrow phones */
+@media(max-width:370px){
+  html.mobile-ui #app{
+    grid-template-columns:minmax(0,1fr) 90px!important;
+  }
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+    grid-template-columns:78px minmax(0,1fr)!important;
+    padding:0 8px!important;
+    gap:6px!important;
+  }
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+    font-size:8px!important;
+  }
+}
+
+
+/* =========================================================
+   MOBILE COMPACT SLIDERS v2
+   Same full-width aiming, less vertical space.
+   Desktop / online transport are untouched.
+   ========================================================= */
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])){
+  height:124px!important;
+  min-height:124px!important;
+  max-height:124px!important;
+  padding:5px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .compactAimGrid{
+  grid-template-columns:60px minmax(0,1fr)!important;
+  grid-template-rows:72px 42px!important;
+  gap:4px!important;
+  height:114px!important;
+}
+
+/* Keep both sliders long, but make each row lower. */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) #legacySliders{
+  height:72px!important;
+  grid-template-rows:34px 34px!important;
+  gap:4px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+  width:100%!important;
+  height:34px!important;
+  min-height:34px!important;
+  grid-template-columns:76px minmax(0,1fr)!important;
+  padding:0 8px!important;
+  gap:7px!important;
+  border-radius:9px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+  font-size:8px!important;
+  letter-spacing:.025em!important;
+}
+
+/* Smaller physical slider, still with a comfortable touch lane. */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]{
+  width:100%!important;
+  min-width:0!important;
+  height:30px!important;
+  min-height:30px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-runnable-track{
+  height:7px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-webkit-slider-thumb{
+  width:24px!important;
+  height:24px!important;
+  margin-top:-9px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-track{
+  height:7px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox input[type=range]::-moz-range-thumb{
+  width:24px!important;
+  height:24px!important;
+}
+
+/* Lower row stays compact as well. */
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwSlot{
+  height:42px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .throwBtn{
+  height:42px!important;
+  min-height:42px!important;
+  font-size:8px!important;
+}
+
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .aimRight{
+  height:42px!important;
+  grid-template-rows:10px 30px!important;
+  gap:2px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballSelect{
+  grid-template-rows:30px!important;
+  height:30px!important;
+  min-height:30px!important;
+  max-height:30px!important;
+}
+html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
+  height:30px!important;
+  min-height:30px!important;
+}
+
+/* Very narrow phones: shrink label only, never slider length. */
+@media(max-width:370px){
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox{
+    grid-template-columns:68px minmax(0,1fr)!important;
+    padding:0 6px!important;
+    gap:5px!important;
+  }
+  html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .sliderBox label{
+    font-size:7px!important;
+  }
+}

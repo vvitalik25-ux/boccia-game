@@ -633,13 +633,13 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
   const s=currentSide();
   if(preStartPause||!s||!isBotSide(s))return;
   clearTimeout(botTimer);
+  const generation=endTransitionGeneration;
   botTimer=setTimeout(()=>{
-    if(preStartPause)return;
+    if(preStartPause||generation!==endTransitionGeneration||!matchStarted||currentSide()!==s)return;
     if(kind==='jack'||phase==='jackRed'||phase==='jackBlue')botThrowJack(s);
     else botThrowColour(s);
   },delay);
 }
-
 
 
 // Owns requests for one room session. Reset invalidates both queued and in-flight work.
@@ -4611,6 +4611,13 @@ function finishEnd(){
   });
 }
 function finishMatch(winner,byTieBreak){
+  // A result callback must never decide a new, still playable end.
+  if(phase!=='end'||redLeft>0||blueLeft>0)return;
+  if(byTieBreak){
+    if(!tieBreak)return;
+    const points=scoreCurrentEnd();
+    if(points.red===points.blue||winner!==(points.red>points.blue?'red':'blue'))return;
+  }else if(tieBreak||endNo<totalEnds||redScore===blueScore||winner!==(redScore>blueScore?'red':'blue'))return;
   phase='finished';updateUI();
   modalTitle.textContent=`${sideOwnerName(winner)} победил! 🏆`;
   modalText.textContent=byTieBreak

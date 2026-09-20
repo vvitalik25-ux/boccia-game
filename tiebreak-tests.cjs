@@ -24,3 +24,12 @@ for(const side of ['red','blue']){
  start.startTieBreak(side);assert.equal(start.phase,side);assert.equal(start.balls.length,0);assert.equal(start.redLeft,6);assert.equal(start.blueLeft,6);assert.equal(start.lastShot,null);assert.equal(start.clock.red,360000);assert.equal(start.tieBreak,true);
 }
 console.log('PASS: real tie-break starts with six fresh balls per side, reset clock, empty court and jack on cross');
+// No timer: a delayed winner from the previous end reaches a cleared pair tie-break.
+const verdict=vm.createContext({phase:'red',tieBreak:true,redLeft:6,blueLeft:6,endNo:4,totalEnds:4,redScore:3,blueScore:3,updateUI(){},tone(){},sideOwnerName:s=>s,modalTitle:{},modalText:{},modal:{classList:{add(){verdict.shown=true}}},scoreCurrentEnd:()=>({red:0,blue:0})});
+vm.runInContext(fn('rules.js','finishMatch'),verdict);
+verdict.finishMatch('blue',true);assert.equal(verdict.shown,undefined);assert.equal(verdict.phase,'red');
+verdict.phase='end';verdict.redLeft=0;verdict.blueLeft=0;
+verdict.finishMatch('blue',true);assert.equal(verdict.shown,undefined,'empty tie-break is not a win');
+verdict.scoreCurrentEnd=()=>({red:1,blue:0});verdict.finishMatch('blue',true);assert.equal(verdict.shown,undefined,'stale winner rejected');
+verdict.finishMatch('red',true);assert.equal(verdict.shown,true,'legitimate completed tie-break wins');
+console.log('PASS: untimed cleared tie-break rejects stale victory; empty or mismatched result rejected; real winner accepted');

@@ -237,6 +237,13 @@ function finishEnd(){
   });
 }
 function finishMatch(winner,byTieBreak){
+  // A result callback must never decide a new, still playable end.
+  if(phase!=='end'||redLeft>0||blueLeft>0)return;
+  if(byTieBreak){
+    if(!tieBreak)return;
+    const points=scoreCurrentEnd();
+    if(points.red===points.blue||winner!==(points.red>points.blue?'red':'blue'))return;
+  }else if(tieBreak||endNo<totalEnds||redScore===blueScore||winner!==(redScore>blueScore?'red':'blue'))return;
   phase='finished';updateUI();
   modalTitle.textContent=`${sideOwnerName(winner)} победил! 🏆`;
   modalText.textContent=byTieBreak

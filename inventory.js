@@ -132,12 +132,12 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
   const s=currentSide();
   if(preStartPause||!s||!isBotSide(s))return;
   clearTimeout(botTimer);
+  const generation=endTransitionGeneration;
   botTimer=setTimeout(()=>{
-    if(preStartPause)return;
+    if(preStartPause||generation!==endTransitionGeneration||!matchStarted||currentSide()!==s)return;
     if(kind==='jack'||phase==='jackRed'||phase==='jackBlue')botThrowJack(s);
     else botThrowColour(s);
   },delay);
 }
-
 
 

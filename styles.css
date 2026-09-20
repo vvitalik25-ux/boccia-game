@@ -239,6 +239,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .onlineConnect{display:grid;gap:8px;margin-top:13px}.onlineConnect>button,.onlineReady{min-height:49px;border-radius:14px;font-size:13px}
 .onlineCreate{background:var(--blue)!important;color:#fff!important;border:0!important}
 .onlineJoinRow{display:grid;grid-template-columns:minmax(0,1fr) 92px;gap:7px}
+.onlineJoinRow #onlineJoinBtn{min-height:47px;border-radius:13px;background:var(--blue);color:#fff;border:1px solid var(--blue);font-size:13px;font-weight:900;padding:0 12px}
+.onlineJoinRow #onlineJoinBtn:focus-visible{outline:3px solid var(--blue-deep);outline-offset:3px}
 .onlineJoinRow input{min-width:0;height:47px;border-radius:13px;border:1px solid #cbd5e1;background:#f6f8fb;color:var(--ink);font:900 15px/1 inherit;text-transform:uppercase;text-align:center;letter-spacing:.14em;outline:none;padding:0 10px}
 .onlineJoinRow input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,95,195,.12)}
 .onlineLobby{display:grid;gap:9px;margin-top:13px}.onlineCodeCard,.onlinePlayersCard{margin:0}

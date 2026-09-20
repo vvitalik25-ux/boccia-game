@@ -7,6 +7,7 @@ function resetLocalClock(){
   localClock=timedMode&&['bot','local'].includes(gameMode)?{remaining:{red:360000,blue:360000},side:null,at:Date.now()}:null;
 }
 function expireLocalSide(side){
+  if(phase==='end'||phase==='finished'||!matchStarted)return;
   clearTimeout(botTimer);
   for(const item of ballInventory[side])item.used=true;
   setBallsLeft(side,0);

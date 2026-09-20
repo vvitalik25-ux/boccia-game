@@ -2817,6 +2817,7 @@ function commitAllocation(){
 }
 
 function showSetup(){
+  cancelEndTransition();
   localClock=null;remoteClock=null;
   if(gameMode==='online'||onlineSocket)onlineDisconnect(true);
   puzzleExitBtn?.classList.add('hidden');
@@ -2908,6 +2909,7 @@ function resetMatch(){
   startRegulationEnd();
 }
 function startRegulationEnd(){
+  cancelEndTransition();
   resetLocalClock();
   clearTimeout(botTimer);balls=[];jack=null;redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;
   lastShot=null;lastColourSide=null;jackNeedsCross=false;aimAngle=0;aimPower=.50;tieBreak=false;
@@ -2921,6 +2923,7 @@ function startRegulationEnd(){
   scheduleBotIfNeeded('jack',650);
 }
 function startTieBreak(firstSide){
+  cancelEndTransition();
   resetLocalClock();
   clearTimeout(botTimer);balls=[];redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;lastShot=null;
   lastColourSide=null;jackNeedsCross=false;tieBreak=true;tieFirst=firstSide;aimAngle=0;aimPower=.50;
@@ -4369,6 +4372,19 @@ function botThrowColour(side){
   lastShot={kind:'colour',side,ball:b,fouled:false,intent:shot.intent||'normal'};
   phase='moving';tone(side==='red'?260:190,.05,.025);updateUI();
 }
+let endTransitionTimer=null,endTransitionGeneration=0;
+function cancelEndTransition(){
+  clearTimeout(endTransitionTimer);endTransitionTimer=null;endTransitionGeneration++;
+}
+function scheduleEndTransition(action){
+  cancelEndTransition();
+  const generation=endTransitionGeneration;
+  endTransitionTimer=setTimeout(()=>{
+    endTransitionTimer=null;
+    if(generation!==endTransitionGeneration||phase!=='end'||!matchStarted)return;
+    action();
+  },1450);
+}
 function isInsideBoundary(b){
   const c=court();
   return b.x-b.r>c.x && b.x+b.r<c.x+c.w && b.y-b.r>c.y && b.y+b.r<c.y+c.h;
@@ -4482,6 +4498,7 @@ function botShouldDecline(side){
   return true;
 }
 function botDecline(side){
+  if(phase!==side||!isBotSide(side)||ballsLeft(side)<=0||ballsLeft(opponent(side))>0)return;
   for(const item of ballInventory[side])item.used=true;
   setBallsLeft(side,0);
   showToast(`Бот отказывается от оставшихся мячей`);
@@ -4498,7 +4515,12 @@ function resolveColourThrow(){
   if(redLeft<=0&&blueLeft<=0){finishEnd();return}
   const next=sideToPlay();
   phase=next;updateUI();
-  if(next&&botShouldDecline(next)){setTimeout(()=>botDecline(next),420);return}
+  if(next&&botShouldDecline(next)){
+    const generation=endTransitionGeneration;
+    clearTimeout(botTimer);
+    botTimer=setTimeout(()=>{if(generation===endTransitionGeneration)botDecline(next)},420);
+    return;
+  }
   scheduleBotIfNeeded('colour',520);
 }
 function resolveStoppedShot(){
@@ -4538,6 +4560,9 @@ function simulatedScoreCurrentEnd(st){
   return{red:0,blue:blues.filter(d=>d<r0-eps).length};
 }
 function finishEnd(){
+  // Physics and clock expiry can resolve the same final ball in one frame.
+  if(phase==='end'||phase==='finished')return;
+  clearTimeout(botTimer);
   if(gameMode==='training'){
     phase='end';updateUI();
     const pts=scoreCurrentEnd();
@@ -4559,11 +4584,11 @@ function finishEnd(){
     if(pts.red===pts.blue){
       showToast('Тай-брейк равный — ещё один');
       const nextFirst=tieFirst==='red'?'blue':'red';
-      setTimeout(()=>startTieBreak(nextFirst),1450);
+      scheduleEndTransition(()=>startTieBreak(nextFirst));
     }else{
       const winner=pts.red>pts.blue?'red':'blue';
       showToast(`Тай-брейк выиграл ${sideOwnerName(winner)}`);
-      setTimeout(()=>finishMatch(winner,true),1450);
+      scheduleEndTransition(()=>finishMatch(winner,true));
     }
     return;
   }
@@ -4574,7 +4599,7 @@ function finishEnd(){
   else if(pts.blue>0)showToast(`${sideOwnerName('blue')}: +${pts.blue}`);
   else showToast('Энд без очков');
 
-  setTimeout(()=>{
+  scheduleEndTransition(()=>{
     if(endNo>=totalEnds){
       if(redScore===blueScore){
         const first=Math.random()<.5?'red':'blue';
@@ -4583,7 +4608,7 @@ function finishEnd(){
     }else{
       endNo++;startRegulationEnd();
     }
-  },1450);
+  });
 }
 function finishMatch(winner,byTieBreak){
   phase='finished';updateUI();
@@ -4593,7 +4618,6 @@ function finishMatch(winner,byTieBreak){
     :`Финальный счёт ${redScore}:${blueScore}.`;
   modal.classList.add('show');tone(640,.16,.04);
 }
-
 function physics(){
   if(phase==='trainingEdit')return;
   if(gameMode==='online')return;
@@ -4708,11 +4732,10 @@ function physics(){
       tickLocalClock();
       const releasedClock=localClock,releasedSide=lastShot?.side;
       resolveStoppedShot();
-      if(releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
+      if(phase!=='end'&&phase!=='finished'&&releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
     }
   }
 }
-
 function draw(){
   clearCanvasForDraw();const c=court(),bw=c.w/6,boxTop=my(10),boxBottom=my(12.5);
   const redBoxes=sideBoxes('red'),blueBoxes=sideBoxes('blue');
@@ -5236,6 +5259,7 @@ function resetLocalClock(){
   localClock=timedMode&&['bot','local'].includes(gameMode)?{remaining:{red:360000,blue:360000},side:null,at:Date.now()}:null;
 }
 function expireLocalSide(side){
+  if(phase==='end'||phase==='finished'||!matchStarted)return;
   clearTimeout(botTimer);
   for(const item of ballInventory[side])item.used=true;
   setBallsLeft(side,0);

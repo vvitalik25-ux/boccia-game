@@ -1,3 +1,16 @@
+let endTransitionTimer=null,endTransitionGeneration=0;
+function cancelEndTransition(){
+  clearTimeout(endTransitionTimer);endTransitionTimer=null;endTransitionGeneration++;
+}
+function scheduleEndTransition(action){
+  cancelEndTransition();
+  const generation=endTransitionGeneration;
+  endTransitionTimer=setTimeout(()=>{
+    endTransitionTimer=null;
+    if(generation!==endTransitionGeneration||phase!=='end'||!matchStarted)return;
+    action();
+  },1450);
+}
 function isInsideBoundary(b){
   const c=court();
   return b.x-b.r>c.x && b.x+b.r<c.x+c.w && b.y-b.r>c.y && b.y+b.r<c.y+c.h;
@@ -111,6 +124,7 @@ function botShouldDecline(side){
   return true;
 }
 function botDecline(side){
+  if(phase!==side||!isBotSide(side)||ballsLeft(side)<=0||ballsLeft(opponent(side))>0)return;
   for(const item of ballInventory[side])item.used=true;
   setBallsLeft(side,0);
   showToast(`Бот отказывается от оставшихся мячей`);
@@ -127,7 +141,12 @@ function resolveColourThrow(){
   if(redLeft<=0&&blueLeft<=0){finishEnd();return}
   const next=sideToPlay();
   phase=next;updateUI();
-  if(next&&botShouldDecline(next)){setTimeout(()=>botDecline(next),420);return}
+  if(next&&botShouldDecline(next)){
+    const generation=endTransitionGeneration;
+    clearTimeout(botTimer);
+    botTimer=setTimeout(()=>{if(generation===endTransitionGeneration)botDecline(next)},420);
+    return;
+  }
   scheduleBotIfNeeded('colour',520);
 }
 function resolveStoppedShot(){
@@ -167,6 +186,9 @@ function simulatedScoreCurrentEnd(st){
   return{red:0,blue:blues.filter(d=>d<r0-eps).length};
 }
 function finishEnd(){
+  // Physics and clock expiry can resolve the same final ball in one frame.
+  if(phase==='end'||phase==='finished')return;
+  clearTimeout(botTimer);
   if(gameMode==='training'){
     phase='end';updateUI();
     const pts=scoreCurrentEnd();
@@ -188,11 +210,11 @@ function finishEnd(){
     if(pts.red===pts.blue){
       showToast('Тай-брейк равный — ещё один');
       const nextFirst=tieFirst==='red'?'blue':'red';
-      setTimeout(()=>startTieBreak(nextFirst),1450);
+      scheduleEndTransition(()=>startTieBreak(nextFirst));
     }else{
       const winner=pts.red>pts.blue?'red':'blue';
       showToast(`Тай-брейк выиграл ${sideOwnerName(winner)}`);
-      setTimeout(()=>finishMatch(winner,true),1450);
+      scheduleEndTransition(()=>finishMatch(winner,true));
     }
     return;
   }
@@ -203,7 +225,7 @@ function finishEnd(){
   else if(pts.blue>0)showToast(`${sideOwnerName('blue')}: +${pts.blue}`);
   else showToast('Энд без очков');
 
-  setTimeout(()=>{
+  scheduleEndTransition(()=>{
     if(endNo>=totalEnds){
       if(redScore===blueScore){
         const first=Math.random()<.5?'red':'blue';
@@ -212,7 +234,7 @@ function finishEnd(){
     }else{
       endNo++;startRegulationEnd();
     }
-  },1450);
+  });
 }
 function finishMatch(winner,byTieBreak){
   phase='finished';updateUI();
@@ -222,4 +244,3 @@ function finishMatch(winner,byTieBreak){
     :`Финальный счёт ${redScore}:${blueScore}.`;
   modal.classList.add('show');tone(640,.16,.04);
 }
-

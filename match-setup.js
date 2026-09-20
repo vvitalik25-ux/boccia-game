@@ -119,6 +119,7 @@ function commitAllocation(){
 }
 
 function showSetup(){
+  cancelEndTransition();
   localClock=null;remoteClock=null;
   if(gameMode==='online'||onlineSocket)onlineDisconnect(true);
   puzzleExitBtn?.classList.add('hidden');
@@ -210,6 +211,7 @@ function resetMatch(){
   startRegulationEnd();
 }
 function startRegulationEnd(){
+  cancelEndTransition();
   resetLocalClock();
   clearTimeout(botTimer);balls=[];jack=null;redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;
   lastShot=null;lastColourSide=null;jackNeedsCross=false;aimAngle=0;aimPower=.50;tieBreak=false;
@@ -223,6 +225,7 @@ function startRegulationEnd(){
   scheduleBotIfNeeded('jack',650);
 }
 function startTieBreak(firstSide){
+  cancelEndTransition();
   resetLocalClock();
   clearTimeout(botTimer);balls=[];redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;lastShot=null;
   lastColourSide=null;jackNeedsCross=false;tieBreak=true;tieFirst=firstSide;aimAngle=0;aimPower=.50;

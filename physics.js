@@ -112,8 +112,7 @@ function physics(){
       tickLocalClock();
       const releasedClock=localClock,releasedSide=lastShot?.side;
       resolveStoppedShot();
-      if(releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
+      if(phase!=='end'&&phase!=='finished'&&releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
     }
   }
 }
-

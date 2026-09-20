@@ -4,7 +4,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<meta name="boccia-build" content="2026-09-19-network-rebuild">
+<meta name="boccia-build" content="2026-09-20-timer">
 <!-- ONLINE_V2_HTTPS_ONLY -->
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
@@ -43,7 +43,7 @@
 })();
 </script>
 
-<link rel="stylesheet" href="styles.css?v=2026-09-20-join-button">
+<link rel="stylesheet" href="styles.css?v=2026-09-20-timer">
 </head>
 <body>
 
@@ -69,6 +69,9 @@
         <p class="aiInfo" id="aiInfo">Эксперт: максимальный поиск позиции и минимальный разброс исполнения.</p>
       </div>
 <p class="setupSmall">Сложность действует только на компьютерного соперника.</p>
+<div class="orientationCard"><div class="orientationHead">Время на энд</div>
+<div class="controlOptions"><button data-timed-mode="off">Без времени</button><button data-timed-mode="6">6 минут на сторону</button></div>
+<p class="setupSmall" id="timeSettingHint">6 минут каждой стороне на энд, включая джек.</p></div>
 <div class="orientationCard"><div class="orientationHead">Управление прицелом</div>
 <div class="controlOptions">
 <button data-control-mode="sliders">Ползунки</button>
@@ -204,6 +207,7 @@
   </div>
 
   <div class="top">
+    <div id="matchClock" class="matchClock" hidden><span class="redClock">Красные <b id="redClock">6:00</b></span><span class="blueClock">Синие <b id="blueClock">6:00</b></span></div>
     <div class="score">
       <span class="badge red"></span>
       <div><div class="name" id="redName">Красный · бокс 3</div><div class="num" id="redScore">0</div></div>
@@ -346,24 +350,25 @@ try{
   }
 }catch{}
 </script>
-<script src="state.js?v=2026-09-19-network-rebuild"></script>
-<script src="configuration.js?v=2026-09-19-network-rebuild"></script>
-<script src="court.js?v=2026-09-19-network-rebuild"></script>
-<script src="inventory.js?v=2026-09-19-network-rebuild"></script>
-<script src="http-transport.js?v=2026-09-19-network-rebuild"></script>
-<script src="online.js?v=2026-09-19-network-rebuild"></script>
-<script src="setup.js?v=2026-09-19-network-rebuild"></script>
-<script src="training.js?v=2026-09-19-network-rebuild"></script>
-<script src="puzzles.js?v=2026-09-19-network-rebuild"></script>
-<script src="match-setup.js?v=2026-09-19-network-rebuild"></script>
-<script src="controls.js?v=2026-09-19-network-rebuild"></script>
-<script src="bot-simulation.js?v=2026-09-19-network-rebuild"></script>
-<script src="bot-strategy.js?v=2026-09-19-network-rebuild"></script>
-<script src="rules.js?v=2026-09-19-network-rebuild"></script>
-<script src="physics.js?v=2026-09-19-network-rebuild"></script>
-<script src="rendering.js?v=2026-09-19-network-rebuild"></script>
-<script src="input.js?v=2026-09-19-network-rebuild"></script>
-<script src="settings.js?v=2026-09-19-network-rebuild"></script>
-<script src="bootstrap.js?v=2026-09-19-network-rebuild"></script>
+<script src="state.js?v=2026-09-20-timer"></script>
+<script src="configuration.js?v=2026-09-20-timer"></script>
+<script src="court.js?v=2026-09-20-timer"></script>
+<script src="inventory.js?v=2026-09-20-timer"></script>
+<script src="http-transport.js?v=2026-09-20-timer"></script>
+<script src="online.js?v=2026-09-20-timer"></script>
+<script src="setup.js?v=2026-09-20-timer"></script>
+<script src="training.js?v=2026-09-20-timer"></script>
+<script src="puzzles.js?v=2026-09-20-timer"></script>
+<script src="match-setup.js?v=2026-09-20-timer"></script>
+<script src="controls.js?v=2026-09-20-timer"></script>
+<script src="bot-simulation.js?v=2026-09-20-timer"></script>
+<script src="bot-strategy.js?v=2026-09-20-timer"></script>
+<script src="rules.js?v=2026-09-20-timer"></script>
+<script src="physics.js?v=2026-09-20-timer"></script>
+<script src="rendering.js?v=2026-09-20-timer"></script>
+<script src="input.js?v=2026-09-20-timer"></script>
+<script src="settings.js?v=2026-09-20-timer"></script>
+<script src="match-clock.js?v=2026-09-20-timer"></script>
+<script src="bootstrap.js?v=2026-09-20-timer"></script>
 </body>
 </html>

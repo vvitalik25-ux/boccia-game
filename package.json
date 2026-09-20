@@ -4,6 +4,7 @@
   "scripts": {
     "build": "node build.cjs",
     "test": "node build.cjs --check && node settings-tests.cjs && node entry-tests.cjs && node timing-tests.cjs",
-    "test:network": "node network-tests.cjs"
+    "test:network": "node network-tests.cjs",
+    "test:clock": "node clock-tests.cjs"
   }
 }

@@ -109,7 +109,10 @@ function physics(){
           showToast('Мяч не вошёл в игровую зону');
         }
       }
+      tickLocalClock();
+      const releasedClock=localClock,releasedSide=lastShot?.side;
       resolveStoppedShot();
+      if(releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
     }
   }
 }

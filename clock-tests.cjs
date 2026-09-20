@@ -1,0 +1,14 @@
+const vm=require('vm'),fs=require('fs'),assert=require('assert/strict');
+const element=()=>({classList:{contains:()=>false,toggle(){}},addEventListener(){},parentElement:{classList:{toggle(){}}}});
+const elements=new Map(),get=id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)};
+let now=1000;
+const c=vm.createContext({console,Date:{now:()=>now},performance:{now:()=>now},setInterval(){},clearTimeout(){},localStorage:{getItem:()=> '6'},document:{getElementById:get,querySelectorAll:()=>[]},gameMode:'local',matchStarted:true,phase:'jackRed',lastShot:null,setupOverlay:element(),startNoticeEl:element(),modal:element(),botTimer:null,ballInventory:{red:[{used:false}],blue:[{used:false}]},redLeft:6,blueLeft:6,jack:null,currentJackBox:3,activePlayerBox:{},onlineRoomCode:'',updateUI(){},showToast(){},ensureActivePlayer(){},ensureSelectedBall(){},scheduleBotIfNeeded(){},nextJackBoxAfter:b=>b===3?4:3,sideForBox:b=>b===3?'red':'blue',sidePhase:(s)=>s==='red'?'jackRed':'jackBlue',opponent:s=>s==='red'?'blue':'red'});
+vm.runInContext(`function currentSide(){return phase==='jackRed'||phase==='red'?'red':phase==='jackBlue'||phase==='blue'?'blue':null} function setBallsLeft(s,n){if(s==='red')redLeft=n;else blueLeft=n} function placeJackOnCross(){jack={}} function finishEnd(){phase='end'}`,c);
+vm.runInContext(fs.readFileSync(__dirname+'/match-clock.js','utf8'),c);
+vm.runInContext('resetLocalClock();tickLocalClock()',c);now+=60000;vm.runInContext('tickLocalClock()',c);
+assert.equal(vm.runInContext('localClock.remaining.red',c),300000);assert.equal(vm.runInContext('localClock.remaining.blue',c),360000);
+now+=300001;vm.runInContext('tickLocalClock()',c);assert.equal(c.redLeft,0);assert.equal(c.phase,'jackBlue');
+vm.runInContext("resetLocalClock();phase='moving';lastShot={side:'blue'};tickLocalClock()",c);now+=360001;vm.runInContext('tickLocalClock()',c);assert.equal(c.phase,'moving');assert.equal(c.blueLeft,6);
+vm.runInContext("phase='blue';tickLocalClock()",c);assert.equal(c.blueLeft,0);assert.equal(c.phase,'end');
+vm.runInContext("timedMode=false;resetLocalClock()",c);assert.equal(vm.runInContext('localClock',c),null);
+console.log('PASS: local side-only countdown, jack timeout, released ball finishes, end timeout, untimed mode');

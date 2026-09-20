@@ -808,6 +808,7 @@ function chooseBotMatchJackHardness(side,profile){
 }
 
 function botThrowJack(side){
+  tickLocalClock();
   if(phase!==sidePhase(side,'jack')||!isBotSide(side))return;
   const pos=launcherFor(side),profile=botProfile();
 
@@ -847,6 +848,7 @@ function botThrowJack(side){
     const executed=botExecutionResult(dx*speed,dy*speed,profile,{jack:true});
     launch=applyRealismToLaunch(executed.vx,executed.vy,'jack',jackHardnessId);
   }
+  tickLocalClock();if(phase!==sidePhase(side,'jack'))return;
   const b=spawnBall('jack',side,pos.x,pos.y,launch.vx,launch.vy,jackHardnessId);
   if(profile.id==='expert')b.realism=null;
 
@@ -880,6 +882,7 @@ function chooseBotPlayerBox(side){
 }
 
 function botThrowColour(side){
+  tickLocalClock();
   if(phase!==side||!isBotSide(side))return;
   chooseBotPlayerBox(side);
   const pos=launcherFor(side),shot=chooseBestBotShot(side),profile=botProfile();
@@ -889,6 +892,7 @@ function botThrowColour(side){
   const hardnessId=shot.hardnessId||ensureSelectedBall(side);
   const launch=applyRealismToLaunch(executed.vx,executed.vy,side,hardnessId);
 
+  tickLocalClock();if(phase!==side)return;
   const b=spawnBall(side,side,pos.x,pos.y,launch.vx,launch.vy,hardnessId);
   consumeBall(side,hardnessId);
   setBallsLeft(side,ballsLeft(side)-1);
@@ -897,4 +901,3 @@ function botThrowColour(side){
   lastShot={kind:'colour',side,ball:b,fouled:false,intent:shot.intent||'normal'};
   phase='moving';tone(side==='red'?260:190,.05,.025);updateUI();
 }
-

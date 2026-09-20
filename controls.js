@@ -117,6 +117,7 @@ function sliderValueToPower(value){
 }
 
 function updateUI(){
+  if(typeof tickLocalClock==='function')tickLocalClock();
   renderAimControls();
   puzzleExitBtn?.classList.toggle('hidden',gameMode!=='puzzle');
   onlineBadge?.classList.toggle('show',gameMode==='online'&&onlineMatchActive);
@@ -178,6 +179,9 @@ function speedFromPower(){
   return min+(max-min)*aimPower;
 }
 function launchHuman(){
+  const requestedSide=currentSide();
+  tickLocalClock();
+  if(currentSide()!==requestedSide)return;
   if(!humanTurn())return;
   const side=currentSide();
   const kind=(phase==='jackRed'||phase==='jackBlue')?'jack':'colour';
@@ -231,4 +235,3 @@ function declineRemaining(){
     finishEnd();
   }
 }
-

@@ -204,7 +204,6 @@ let allocationWorking={};
 let ballAllocation={red:{3:[]},blue:{4:[]}};
 const minSpeed=.045;
 
-
 function realismSoftnessFactor(hardnessId=null){
   const map={superHard:.45,hard:.58,medium:.72,mediumSoft:.87,soft:1.02,superSoft:1.18};
   return map[hardnessId||'soft']??1.02;
@@ -322,7 +321,6 @@ function renderFormatButtons(){
 
   renderFieldOrientation();
 }
-
 
 function court(){
   const ratio=12.5/6,pad=7,aw=W-pad*2,ah=H-pad*2;
@@ -501,7 +499,6 @@ function showTimedNotice(title,text,duration=1750){
   },duration);
 }
 
-
 function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y,(a.z||0)-(b.z||0))}
 function allObjects(){return jack?[jack,...balls]:[...balls]}
 function moving(){return allObjects().some(b=>Math.hypot(b.vx,b.vy)>.06||Math.abs(b.vz||0)>.05)}
@@ -642,7 +639,6 @@ function scheduleBotIfNeeded(kind='colour',delay=560){
     else botThrowColour(s);
   },delay);
 }
-
 
 
 
@@ -1178,6 +1174,10 @@ function renderOnlineLobby(){
   onlineJoinBtn.textContent=onlineEntryBusy&&!onlineCreatingRoom?'Проверяем…':'Войти';
 
   const hasRoom=!!onlineRoomCode;
+  document.getElementById('onlineTimeMode')?.remove();
+  const timeLabel=document.createElement('p');timeLabel.id='onlineTimeMode';timeLabel.className='setupSmall';
+  timeLabel.textContent=(onlineTimedMode??timedMode)?'По времени · 6 минут на сторону на энд':'Без ограничения времени';
+  onlineLobbyEl.appendChild(timeLabel);
   onlineConnectEl.classList.toggle('hidden',hasRoom);
   onlineLobbyEl.classList.toggle('hidden',!hasRoom);
   onlineRoomCodeEl.textContent=onlineRoomCode||'-----';
@@ -1478,6 +1478,7 @@ function onlineProtocolMismatch(data=null){
 // -------------------- incoming messages --------------------
 
 function onlineHandleMessage(data){
+  acceptRemoteClock(data);
   if(!data||typeof data!=='object')return;
 
   if(['joined','room_state','snapshot','action_error','restart'].includes(data.type)){
@@ -1718,6 +1719,7 @@ async function onlineCreateRoom(){
       clientKey:onlineClientKey,
       requestId:onlineCreateRequestId||(onlineCreateRequestId=onlineMakeActionId()),
       format:'individual',
+      timed:timedMode?'1':'0',
       orientation:fieldOrientation,
       realism:realisticMode?'1':'0',
       physicsW:String(pc.w),
@@ -1801,6 +1803,7 @@ async function onlineJoinRoom(code){
 }
 
 function onlineDisconnect(clearRoom=true){
+  onlineTimedMode=null;remoteClock=null;remoteClockRevision=0;remoteClockMatch=null;
   const leavingCode=onlineRoomCode,leavingSide=onlineSide,leavingSession=onlineHttpSessionId;
   onlineTransport.reset();
   onlineCreateRequestId=null;
@@ -2165,7 +2168,6 @@ function startKitSelection(){
   openKitStep(humanSides[0]||'red');
 }
 
-
 function trainingPlacedCount(side){
   return balls.filter(b=>b.kind===side).length;
 }
@@ -2418,7 +2420,6 @@ function repeatTrainingSituation(){
   restoreTrainingState(trainingSnapshot);
   beginTrainingSituation();
 }
-
 
 function puzzlePoint(xf,yf){
   const c=court();
@@ -2695,7 +2696,6 @@ function resolvePuzzleThrow(){
   showToast(`Осталось мячей: ${ballsLeft(puzzle.side)}`);
 }
 
-
 function autoAllocateSide(side){
   ballAllocation[side]=defaultAllocationForSide(side);
 }
@@ -2817,6 +2817,7 @@ function commitAllocation(){
 }
 
 function showSetup(){
+  localClock=null;remoteClock=null;
   if(gameMode==='online'||onlineSocket)onlineDisconnect(true);
   puzzleExitBtn?.classList.add('hidden');
   clearTrainingStageSizeLock();
@@ -2907,6 +2908,7 @@ function resetMatch(){
   startRegulationEnd();
 }
 function startRegulationEnd(){
+  resetLocalClock();
   clearTimeout(botTimer);balls=[];jack=null;redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;
   lastShot=null;lastColourSide=null;jackNeedsCross=false;aimAngle=0;aimPower=.50;tieBreak=false;
   equidistantSequence=false;equidistantNextSide=null;
@@ -2919,6 +2921,7 @@ function startRegulationEnd(){
   scheduleBotIfNeeded('jack',650);
 }
 function startTieBreak(firstSide){
+  resetLocalClock();
   clearTimeout(botTimer);balls=[];redLeft=totalSideBalls();blueLeft=totalSideBalls();settleFrames=0;lastShot=null;
   lastColourSide=null;jackNeedsCross=false;tieBreak=true;tieFirst=firstSide;aimAngle=0;aimPower=.50;
   equidistantSequence=false;equidistantNextSide=null;
@@ -2935,7 +2938,6 @@ function startTieBreak(firstSide){
   showToast(`Тай-брейк · первым ${sideOwnerName(firstSide)}`);
   scheduleBotIfNeeded('colour',650);
 }
-
 function playerSelectionLocked(side){
   return !!firstColourLockedBox[side] && phase===side;
 }
@@ -3055,6 +3057,7 @@ function sliderValueToPower(value){
 }
 
 function updateUI(){
+  if(typeof tickLocalClock==='function')tickLocalClock();
   renderAimControls();
   puzzleExitBtn?.classList.toggle('hidden',gameMode!=='puzzle');
   onlineBadge?.classList.toggle('show',gameMode==='online'&&onlineMatchActive);
@@ -3116,6 +3119,9 @@ function speedFromPower(){
   return min+(max-min)*aimPower;
 }
 function launchHuman(){
+  const requestedSide=currentSide();
+  tickLocalClock();
+  if(currentSide()!==requestedSide)return;
   if(!humanTurn())return;
   const side=currentSide();
   const kind=(phase==='jackRed'||phase==='jackBlue')?'jack':'colour';
@@ -3169,8 +3175,6 @@ function declineRemaining(){
     finishEnd();
   }
 }
-
-
 function botTravelForSpeed(speed,decel){
   let s=Math.max(0,speed),travel=0;
   for(let i=0;i<520&&s>0;i++){
@@ -3462,7 +3466,6 @@ function simulateBotCandidate(candidate,side,steps=260){
   }
   return st;
 }
-
 function evaluateBotState(st,side){
   if(!st.jack)return -100000;
   const opp=opponent(side);
@@ -4273,6 +4276,7 @@ function chooseBotMatchJackHardness(side,profile){
 }
 
 function botThrowJack(side){
+  tickLocalClock();
   if(phase!==sidePhase(side,'jack')||!isBotSide(side))return;
   const pos=launcherFor(side),profile=botProfile();
 
@@ -4312,6 +4316,7 @@ function botThrowJack(side){
     const executed=botExecutionResult(dx*speed,dy*speed,profile,{jack:true});
     launch=applyRealismToLaunch(executed.vx,executed.vy,'jack',jackHardnessId);
   }
+  tickLocalClock();if(phase!==sidePhase(side,'jack'))return;
   const b=spawnBall('jack',side,pos.x,pos.y,launch.vx,launch.vy,jackHardnessId);
   if(profile.id==='expert')b.realism=null;
 
@@ -4345,6 +4350,7 @@ function chooseBotPlayerBox(side){
 }
 
 function botThrowColour(side){
+  tickLocalClock();
   if(phase!==side||!isBotSide(side))return;
   chooseBotPlayerBox(side);
   const pos=launcherFor(side),shot=chooseBestBotShot(side),profile=botProfile();
@@ -4354,6 +4360,7 @@ function botThrowColour(side){
   const hardnessId=shot.hardnessId||ensureSelectedBall(side);
   const launch=applyRealismToLaunch(executed.vx,executed.vy,side,hardnessId);
 
+  tickLocalClock();if(phase!==side)return;
   const b=spawnBall(side,side,pos.x,pos.y,launch.vx,launch.vy,hardnessId);
   consumeBall(side,hardnessId);
   setBallsLeft(side,ballsLeft(side)-1);
@@ -4362,8 +4369,6 @@ function botThrowColour(side){
   lastShot={kind:'colour',side,ball:b,fouled:false,intent:shot.intent||'normal'};
   phase='moving';tone(side==='red'?260:190,.05,.025);updateUI();
 }
-
-
 function isInsideBoundary(b){
   const c=court();
   return b.x-b.r>c.x && b.x+b.r<c.x+c.w && b.y-b.r>c.y && b.y+b.r<c.y+c.h;
@@ -4589,7 +4594,6 @@ function finishMatch(winner,byTieBreak){
   modal.classList.add('show');tone(640,.16,.04);
 }
 
-
 function physics(){
   if(phase==='trainingEdit')return;
   if(gameMode==='online')return;
@@ -4701,11 +4705,13 @@ function physics(){
           showToast('Мяч не вошёл в игровую зону');
         }
       }
+      tickLocalClock();
+      const releasedClock=localClock,releasedSide=lastShot?.side;
       resolveStoppedShot();
+      if(releasedClock&&localClock===releasedClock&&releasedSide&&releasedClock.remaining[releasedSide]<=0)expireLocalSide(releasedSide);
     }
   }
 }
-
 
 function draw(){
   clearCanvasForDraw();const c=court(),bw=c.w/6,boxTop=my(10),boxBottom=my(12.5);
@@ -4887,7 +4893,6 @@ function drawAim(side){
   const ex=pos.x+nx*len,ey=pos.y+ny*len;ctx.fillStyle='rgba(255,255,255,.92)';ctx.beginPath();
   ctx.moveTo(ex,ey);ctx.lineTo(ex-nx*12-ny*6,ey-ny*12+nx*6);ctx.lineTo(ex-nx*12+ny*6,ey-ny*12-nx*6);ctx.closePath();ctx.fill();ctx.restore();
 }
-
 
 function syncAimFromSliders(){
   if(!humanTurn())return;
@@ -5222,7 +5227,82 @@ window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
   if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });
-
+// Six minutes per side, shared by all players on that side in pairs/teams.
+let timedMode=false,localClock=null,remoteClock=null,remoteClockAt=0,remoteServerNow=0,onlineTimedMode=null,remoteClockRevision=0,remoteClockMatch=null;
+try{timedMode=localStorage.getItem('boccia-timed-mode')==='6'}catch{}
+const clockPanel=document.getElementById('matchClock');
+function clockSide(){return phase==='moving'?lastShot?.side:currentSide();}
+function resetLocalClock(){
+  localClock=timedMode&&['bot','local'].includes(gameMode)?{remaining:{red:360000,blue:360000},side:null,at:Date.now()}:null;
+}
+function expireLocalSide(side){
+  clearTimeout(botTimer);
+  for(const item of ballInventory[side])item.used=true;
+  setBallsLeft(side,0);
+  showToast(`${side==='red'?'Красные':'Синие'}: время истекло`);
+  if(redLeft<=0&&blueLeft<=0){if(!jack)placeJackOnCross();finishEnd();return;}
+  if(currentSide()===side){
+    const other=opponent(side);
+    if(!jack){
+      do{currentJackBox=nextJackBoxAfter(currentJackBox)}while(sideForBox(currentJackBox)!==other);
+      activePlayerBox[other]=currentJackBox;phase=sidePhase(other,'jack');
+    }else{phase=other;ensureActivePlayer(other);ensureSelectedBall(other);}
+  }
+  scheduleBotIfNeeded(phase==='jackRed'||phase==='jackBlue'?'jack':'colour',520);
+  updateUI();
+}
+let tickingClock=false;
+function tickLocalClock(){
+  if(tickingClock||!localClock||gameMode==='online')return;
+  tickingClock=true;
+  try{
+    const c=localClock,now=Date.now();
+    if(c.side)c.remaining[c.side]=Math.max(0,c.remaining[c.side]-Math.max(0,now-c.at));
+    c.at=now;
+    const playing=matchStarted&&!setupOverlay.classList.contains('show')&&!startNoticeEl.classList.contains('show')&&!modal.classList.contains('show');
+    c.side=playing?clockSide():null;
+    if(playing&&phase!=='moving'&&c.side&&c.remaining[c.side]<=0)expireLocalSide(c.side);
+  }finally{tickingClock=false;}
+}
+function acceptRemoteClock(data){
+  if(data?.config)onlineTimedMode=!!data.config.timedMode;
+  if(!data)return;
+  if(!Object.prototype.hasOwnProperty.call(data,'clock'))return;
+  if(data.state?.matchId&&data.state.matchId!==remoteClockMatch){remoteClockMatch=data.state.matchId;remoteClockRevision=0;}
+  const revision=Number(data.revision)||0;
+  if(revision<remoteClockRevision)return;
+  remoteClockRevision=revision;
+  remoteClock=data.clock;remoteServerNow=Number(data.serverNow)||Date.now();remoteClockAt=performance.now();
+}
+function renderMatchClock(){
+  tickLocalClock();
+  const c=gameMode==='online'?remoteClock:localClock;
+  clockPanel.hidden=!c||!matchStarted||setupOverlay.classList.contains('show');
+  if(clockPanel.hidden)return;
+  const now=gameMode==='online'?remoteServerNow+performance.now()-remoteClockAt:Date.now();
+  for(const side of ['red','blue']){
+    const value=gameMode==='online'?Math.max(0,c.remaining[side]-(c.side===side?Math.max(0,now-c.activeAt):0)):c.remaining[side];
+    const seconds=Math.ceil(value/1000),el=document.getElementById(side+'Clock');
+    el.textContent=String(Math.floor(seconds/60))+':'+String(seconds%60).padStart(2,'0');
+    el.parentElement.classList.toggle('active',c.side===side);
+    el.parentElement.classList.toggle('urgent',seconds<=30);
+  }
+}
+function renderTimeSetting(){
+  const locked=matchStarted||!!onlineRoomCode;
+  document.querySelectorAll('[data-timed-mode]').forEach(b=>{
+    b.disabled=locked;b.setAttribute('aria-pressed',String((b.dataset.timedMode==='6')===timedMode));
+  });
+  document.getElementById('timeSettingHint').textContent=locked?'Время фиксируется до начала матча или создания комнаты.':'6 минут каждой стороне на энд, включая джек. Оставшиеся мячи снимаются, когда время истекло.';
+}
+document.querySelectorAll('[data-timed-mode]').forEach(b=>b.addEventListener('click',()=>{
+  if(matchStarted||onlineRoomCode)return;
+  timedMode=b.dataset.timedMode==='6';
+  try{localStorage.setItem('boccia-timed-mode',timedMode?'6':'off')}catch{}
+  renderTimeSetting();
+}));
+document.getElementById('settingsBtn').addEventListener('click',renderTimeSetting);
+setInterval(renderMatchClock,100);
 // Physics is tuned for 60 steps/second, independently of display refresh rate.
 let simulationLastTime=null,simulationRemainder=0;
 function loop(now=performance.now()){
@@ -5262,5 +5342,4 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 resize();renderFormatButtons();showSetup();loop();
-
 })();

@@ -497,6 +497,10 @@ function renderOnlineLobby(){
   onlineJoinBtn.textContent=onlineEntryBusy&&!onlineCreatingRoom?'Проверяем…':'Войти';
 
   const hasRoom=!!onlineRoomCode;
+  document.getElementById('onlineTimeMode')?.remove();
+  const timeLabel=document.createElement('p');timeLabel.id='onlineTimeMode';timeLabel.className='setupSmall';
+  timeLabel.textContent=(onlineTimedMode??timedMode)?'По времени · 6 минут на сторону на энд':'Без ограничения времени';
+  onlineLobbyEl.appendChild(timeLabel);
   onlineConnectEl.classList.toggle('hidden',hasRoom);
   onlineLobbyEl.classList.toggle('hidden',!hasRoom);
   onlineRoomCodeEl.textContent=onlineRoomCode||'-----';
@@ -797,6 +801,7 @@ function onlineProtocolMismatch(data=null){
 // -------------------- incoming messages --------------------
 
 function onlineHandleMessage(data){
+  acceptRemoteClock(data);
   if(!data||typeof data!=='object')return;
 
   if(['joined','room_state','snapshot','action_error','restart'].includes(data.type)){
@@ -1037,6 +1042,7 @@ async function onlineCreateRoom(){
       clientKey:onlineClientKey,
       requestId:onlineCreateRequestId||(onlineCreateRequestId=onlineMakeActionId()),
       format:'individual',
+      timed:timedMode?'1':'0',
       orientation:fieldOrientation,
       realism:realisticMode?'1':'0',
       physicsW:String(pc.w),
@@ -1120,6 +1126,7 @@ async function onlineJoinRoom(code){
 }
 
 function onlineDisconnect(clearRoom=true){
+  onlineTimedMode=null;remoteClock=null;remoteClockRevision=0;remoteClockMatch=null;
   const leavingCode=onlineRoomCode,leavingSide=onlineSide,leavingSession=onlineHttpSessionId;
   onlineTransport.reset();
   onlineCreateRequestId=null;

@@ -231,7 +231,6 @@ function finishPuzzle(success,reason=''){
   if(!puzzle)return;
   puzzleLastSuccess=success;
   phase='finished';
-  updateUI();
 
   const pts=scoreCurrentEnd();
   modalTitle.textContent=success?'Задача решена ✓':'Не получилось';
@@ -242,7 +241,11 @@ function finishPuzzle(success,reason=''){
     modalText.textContent=reason||`Цель не выполнена. Попробуй ещё раз.`;
     againBtn.textContent='Повторить задачу';
   }
-  modal.classList.add('show');
+  document.getElementById('puzzleResultTitle').textContent=modalTitle.textContent;
+  document.getElementById('puzzleResultText').textContent=modalText.textContent;
+  document.getElementById('puzzleResultNextBtn').textContent=againBtn.textContent;
+  modal.classList.remove('show');
+  updateUI();
 }
 function resolvePuzzleThrow(){
   if(jackNeedsCross||!jack||!isJackValid(jack)){
@@ -272,4 +275,3 @@ function resolvePuzzleThrow(){
   updateUI();
   showToast(`Осталось мячей: ${ballsLeft(puzzle.side)}`);
 }
-

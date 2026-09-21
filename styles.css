@@ -1628,3 +1628,11 @@ html.mobile-ui .aimPanel:has(#legacySliders:not([hidden])) .ballChoice{
 
 .matchClock{position:fixed;top:calc(env(safe-area-inset-top,0px) + 54px);left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:12;pointer-events:none;font-size:11px;font-weight:800}
 .matchClock[hidden]{display:none}.matchClock span{padding:5px 9px;border-radius:10px;background:#fff;color:#152b48;border:2px solid transparent;box-shadow:0 2px 5px #0002;white-space:nowrap}.matchClock b{font-size:17px;font-variant-numeric:tabular-nums;margin-left:4px}.matchClock .redClock.active{border-color:#d92340}.matchClock .blueClock.active{border-color:#2162c5}.matchClock .urgent b{color:#bc1331}
+html #app #aimPanel.puzzleFinished{height:auto!important;min-height:88px!important;max-height:none!important;overflow:visible!important}
+html #app #aimPanel.puzzleFinished>:not(.puzzleResult){display:none!important}
+.puzzleResult{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:6px}
+.puzzleResult[hidden]{display:none}
+.puzzleResultText{min-width:0;color:#fff;font-size:13px;line-height:1.35}
+.puzzleResultText strong{font-size:16px}.puzzleResultText p{margin:4px 0 0;color:#d7e3f3}
+#puzzleResultNextBtn{flex:0 0 auto;min-height:44px;padding:8px 14px;background:#2162c5;color:#fff;border-radius:12px;font-size:13px}
+@media(max-width:480px){.puzzleResult{gap:8px}.puzzleResultText{font-size:11px}.puzzleResultText strong{font-size:14px}#puzzleResultNextBtn{max-width:125px;white-space:normal}}

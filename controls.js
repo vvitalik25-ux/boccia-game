@@ -117,6 +117,9 @@ function sliderValueToPower(value){
 }
 
 function updateUI(){
+  const viewingPuzzleResult=gameMode==='puzzle'&&phase==='finished';
+  aimPanel.classList.toggle('puzzleFinished',viewingPuzzleResult);
+  document.getElementById('puzzleResult').hidden=!viewingPuzzleResult;
   if(typeof tickLocalClock==='function')tickLocalClock();
   renderAimControls();
   puzzleExitBtn?.classList.toggle('hidden',gameMode!=='puzzle');
@@ -151,7 +154,7 @@ function updateUI(){
       :`${sideOwnerName(s)} · бокс ${activePlayerBox[s]} · ${ballsLeft(s)}${hardness}`;
   }else if(phase==='moving')statusEl.textContent=gameMode==='online'&&onlineRemoteMoving?'Соперник бросает…':'Мяч катится…';
   else if(phase==='end')statusEl.textContent='Подсчёт очков';
-  else statusEl.textContent='Матч окончен';
+  else statusEl.textContent=gameMode==='puzzle'?'Результат задачи':'Матч окончен';
 
   const h=humanTurn();
   hintEl.textContent=phase==='trainingEdit'

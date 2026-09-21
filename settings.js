@@ -118,6 +118,7 @@ for(const button of [fieldVerticalBtn,fieldHorizontalBtn,aiEasyBtn,aiMediumBtn,a
 
 // Desktop shortcuts work independently of the selected aiming device.
 function handleGameShortcut(e){
+  if(e.target.closest?.('#puzzleResultNextBtn')&&(e.code==='Space'||e.code==='Enter'))return;
   if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))return;
   if(e.code==='Escape'){
     e.preventDefault();if(e.repeat)return;resetControls();
@@ -138,5 +139,6 @@ function handleGameShortcut(e){
 }
 window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
+  if(e.target.closest?.('#puzzleResultNextBtn'))return;
   if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });

@@ -169,6 +169,10 @@ restartBtn.addEventListener('click',()=>{
   else if(gameMode==='puzzle')startRandomPuzzle();
   else showSetup();
 });
+document.getElementById('puzzleResultNextBtn').addEventListener('click',()=>{
+  if(gameMode!=='puzzle'||phase!=='finished')return;
+  if(puzzleLastSuccess)startRandomPuzzle();else repeatPuzzle();
+});
 againBtn.addEventListener('click',()=>{
   modal.classList.remove('show');
   if(gameMode==='training'&&trainingSnapshot)repeatTrainingSituation();
@@ -187,5 +191,4 @@ document.addEventListener('selectstart',e=>{if(!e.target.closest?.('input,textar
 document.addEventListener('dragstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('gesturestart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
-
 

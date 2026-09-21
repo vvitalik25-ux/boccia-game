@@ -2654,7 +2654,6 @@ function finishPuzzle(success,reason=''){
   if(!puzzle)return;
   puzzleLastSuccess=success;
   phase='finished';
-  updateUI();
 
   const pts=scoreCurrentEnd();
   modalTitle.textContent=success?'Задача решена ✓':'Не получилось';
@@ -2665,7 +2664,11 @@ function finishPuzzle(success,reason=''){
     modalText.textContent=reason||`Цель не выполнена. Попробуй ещё раз.`;
     againBtn.textContent='Повторить задачу';
   }
-  modal.classList.add('show');
+  document.getElementById('puzzleResultTitle').textContent=modalTitle.textContent;
+  document.getElementById('puzzleResultText').textContent=modalText.textContent;
+  document.getElementById('puzzleResultNextBtn').textContent=againBtn.textContent;
+  modal.classList.remove('show');
+  updateUI();
 }
 function resolvePuzzleThrow(){
   if(jackNeedsCross||!jack||!isJackValid(jack)){
@@ -2695,7 +2698,6 @@ function resolvePuzzleThrow(){
   updateUI();
   showToast(`Осталось мячей: ${ballsLeft(puzzle.side)}`);
 }
-
 function autoAllocateSide(side){
   ballAllocation[side]=defaultAllocationForSide(side);
 }
@@ -3060,6 +3062,9 @@ function sliderValueToPower(value){
 }
 
 function updateUI(){
+  const viewingPuzzleResult=gameMode==='puzzle'&&phase==='finished';
+  aimPanel.classList.toggle('puzzleFinished',viewingPuzzleResult);
+  document.getElementById('puzzleResult').hidden=!viewingPuzzleResult;
   if(typeof tickLocalClock==='function')tickLocalClock();
   renderAimControls();
   puzzleExitBtn?.classList.toggle('hidden',gameMode!=='puzzle');
@@ -3094,7 +3099,7 @@ function updateUI(){
       :`${sideOwnerName(s)} · бокс ${activePlayerBox[s]} · ${ballsLeft(s)}${hardness}`;
   }else if(phase==='moving')statusEl.textContent=gameMode==='online'&&onlineRemoteMoving?'Соперник бросает…':'Мяч катится…';
   else if(phase==='end')statusEl.textContent='Подсчёт очков';
-  else statusEl.textContent='Матч окончен';
+  else statusEl.textContent=gameMode==='puzzle'?'Результат задачи':'Матч окончен';
 
   const h=humanTurn();
   hintEl.textContent=phase==='trainingEdit'
@@ -5095,6 +5100,10 @@ restartBtn.addEventListener('click',()=>{
   else if(gameMode==='puzzle')startRandomPuzzle();
   else showSetup();
 });
+document.getElementById('puzzleResultNextBtn').addEventListener('click',()=>{
+  if(gameMode!=='puzzle'||phase!=='finished')return;
+  if(puzzleLastSuccess)startRandomPuzzle();else repeatPuzzle();
+});
 againBtn.addEventListener('click',()=>{
   modal.classList.remove('show');
   if(gameMode==='training'&&trainingSnapshot)repeatTrainingSituation();
@@ -5113,7 +5122,6 @@ document.addEventListener('selectstart',e=>{if(!e.target.closest?.('input,textar
 document.addEventListener('dragstart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('contextmenu',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
 document.addEventListener('gesturestart',e=>{if(!e.target.closest?.('input,textarea,[contenteditable="true"]'))e.preventDefault()},{passive:false});
-
 
 // Local input preferences; online simulation and room configuration remain authoritative.
 const settingsDialog=document.getElementById('settingsDialog');
@@ -5235,6 +5243,7 @@ for(const button of [fieldVerticalBtn,fieldHorizontalBtn,aiEasyBtn,aiMediumBtn,a
 
 // Desktop shortcuts work independently of the selected aiming device.
 function handleGameShortcut(e){
+  if(e.target.closest?.('#puzzleResultNextBtn')&&(e.code==='Space'||e.code==='Enter'))return;
   if(e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))return;
   if(e.code==='Escape'){
     e.preventDefault();if(e.repeat)return;resetControls();
@@ -5255,6 +5264,7 @@ function handleGameShortcut(e){
 }
 window.addEventListener('keydown',handleGameShortcut);
 window.addEventListener('keyup',e=>{
+  if(e.target.closest?.('#puzzleResultNextBtn'))return;
   if(e.code==='Space'&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!e.target.closest?.('input:not([type="range"]),textarea,select,[contenteditable]'))e.preventDefault();
 });
 // Six minutes per side, shared by all players on that side in pairs/teams.

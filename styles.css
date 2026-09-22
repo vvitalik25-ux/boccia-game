@@ -1641,3 +1641,9 @@ html #app #aimPanel.puzzleFinished>:not(.puzzleResult){display:none!important}
 html.desktop-ui .gameActions .declineTop{min-width:84px!important;line-height:1.15!important;white-space:normal!important;padding:0 5px!important}
 html.mobile-ui .gameActions:has(.puzzleExit:not(.hidden)){grid-template-columns:38px minmax(44px,1fr) 38px!important}
 html.mobile-ui .gameActions .puzzleExit{min-width:0;font-size:9px;line-height:1.1}
+
+#newsDialog{width:min(420px,calc(100vw - 32px));box-sizing:border-box;border:0;border-radius:22px;padding:24px;color:#14243c;background:#fff;box-shadow:0 20px 70px #0006}
+#newsDialog::backdrop{background:#07162eb3}
+#newsDialog h2{margin:0 0 12px;font-size:23px}#newsDialog p{font-size:15px;line-height:1.5;margin:0 0 20px}.newsActions{display:flex;gap:10px;flex-wrap:wrap}.newsActions button{min-height:44px;padding:10px 16px;font-size:14px;border-radius:12px;background:#e9edf4;color:#14243c}#newsSettingsBtn{background:#2162c5;color:white}
+
+.betaBadge{display:inline-block;vertical-align:middle;font-size:12px;line-height:1.2;letter-spacing:.06em;padding:5px 8px;border-radius:8px;background:#2162c5;color:#fff}

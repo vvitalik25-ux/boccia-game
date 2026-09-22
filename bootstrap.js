@@ -37,3 +37,8 @@ document.addEventListener('visibilitychange',()=>{
 });
 
 resize();renderFormatButtons();showSetup();loop();
+// Show once on page opening, without interrupting returns to an existing tab.
+const newsDialog=document.getElementById('newsDialog');
+document.getElementById('newsCloseBtn').addEventListener('click',()=>newsDialog.close());
+document.getElementById('newsSettingsBtn').addEventListener('click',()=>{newsDialog.close();settingsButton.click();});
+newsDialog.showModal();

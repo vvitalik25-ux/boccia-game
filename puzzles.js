@@ -150,7 +150,7 @@ function buildRandomPuzzle(){
       balls.push(puzzleAddRelative(side,a,2.85+i*.32,i===0?'soft':'mediumSoft'));
     }
 
-    objective=`Заработай минимум ${target} очка${target===2?'':'ов'}.`;
+    objective=`Заработай минимум ${target} очка.`;
     short=`Набери ${target}+ очка`;
   }else if(variant===2){
     type='swing';
@@ -167,7 +167,7 @@ function buildRandomPuzzle(){
       balls.push(puzzleAddRelative(side,baseAngle+Math.PI+i*.48,3.35+i*.38,'soft'));
     }
 
-    objective=`Убери очки соперника и заработай минимум ${target} ${target===1?'своё очко':'своих очка'}.`;
+    objective=`Убери очки соперника и набери минимум ${target} ${target===1?'очко':'очка'}.`;
     short=`Сними очки и сделай +${target}`;
   }else{
     type='remove';

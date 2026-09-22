@@ -1636,3 +1636,8 @@ html #app #aimPanel.puzzleFinished>:not(.puzzleResult){display:none!important}
 .puzzleResultText strong{font-size:16px}.puzzleResultText p{margin:4px 0 0;color:#d7e3f3}
 #puzzleResultNextBtn{flex:0 0 auto;min-height:44px;padding:8px 14px;background:#2162c5;color:#fff;border-radius:12px;font-size:13px}
 @media(max-width:480px){.puzzleResult{gap:8px}.puzzleResultText{font-size:11px}.puzzleResultText strong{font-size:14px}#puzzleResultNextBtn{max-width:125px;white-space:normal}}
+
+/* Keep puzzle actions within the top bar, including the extra menu button. */
+html.desktop-ui .gameActions .declineTop{min-width:84px!important;line-height:1.15!important;white-space:normal!important;padding:0 5px!important}
+html.mobile-ui .gameActions:has(.puzzleExit:not(.hidden)){grid-template-columns:38px minmax(44px,1fr) 38px!important}
+html.mobile-ui .gameActions .puzzleExit{min-width:0;font-size:9px;line-height:1.1}

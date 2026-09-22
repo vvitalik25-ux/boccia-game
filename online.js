@@ -559,6 +559,14 @@ function renderOnlineLobby(){
       :(onlineReady?'✓ Готов':'Готов');
 }
 
+// Match the server's limits when restoring rooms created by older clients.
+function onlineNormalizePhysicsProfile(profile){
+  const finite=(value,fallback)=>Number.isFinite(Number(value))&&value!=null?Number(value):fallback;
+  const w=Math.max(120,Math.min(1200,finite(profile?.w,288)));
+  const h=Math.max(250,Math.min(2500,finite(profile?.h,w*12.5/6)));
+  const r=Math.max(5,Math.min(20,finite(profile?.r,Math.max(7.8,Math.min(12.5,w*.032)))));
+  return {w,h,r};
+}
 function onlineDeserializeObject(o){
   if(!o)return null;
   const c=court();
@@ -586,7 +594,7 @@ function onlineApplyState(s,revision=0){
   const keepSide=onlineSide;
   onlineRevision=incoming;
   onlineMatchId=s.matchId||onlineMatchId;
-  onlinePhysicsProfile=s.physicsProfile||onlinePhysicsProfile;
+  onlinePhysicsProfile=onlineNormalizePhysicsProfile(s.physicsProfile);
 
   if(s.endNo!==endNo||!!s.tieBreak!==tieBreak){
     aimAngle=0;
@@ -813,6 +821,8 @@ function onlineHandleMessage(data){
   }
 
   if(data.type==='joined'){
+    // Replace playback from the previous connection before restoring its snapshot.
+    onlineResetPlayback();
     onlineMarkHealthy();
     onlineConnectionStatus='';
     onlinePlayerId=data.playerId;
@@ -1037,7 +1047,8 @@ async function onlineCreateRoom(){
     matchFormat='individual';
     renderFormatButtons();
 
-    const pc=court();
+    // Screen size and browser zoom must never define room physics.
+    const pc={w:288,h:600,r:9.216};
     const params=new URLSearchParams({
       clientKey:onlineClientKey,
       requestId:onlineCreateRequestId||(onlineCreateRequestId=onlineMakeActionId()),
@@ -1047,7 +1058,7 @@ async function onlineCreateRoom(){
       realism:realisticMode?'1':'0',
       physicsW:String(pc.w),
       physicsH:String(pc.h),
-      physicsR:String(ballR()),
+      physicsR:String(pc.r),
       build:APP_BUILD,
       protocol:ONLINE_PROTOCOL
     });

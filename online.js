@@ -654,7 +654,7 @@ function onlineApplyState(s,revision=0){
   return true;
 }
 
-function onlineEnterMatch(state,revision){
+function onlineEnterMatch(state,revision,restoring=false){
   const resuming=onlineMatchActive&&(!state.matchId||state.matchId===onlineMatchId);
 
   onlineMatchActive=true;
@@ -670,7 +670,7 @@ function onlineEnterMatch(state,revision){
   relayoutSoon();
   updateUI();
 
-  if(resuming)return;
+  if(resuming||restoring)return;
 
   aimAngle=0;
   aimPower=.50;
@@ -841,7 +841,7 @@ function onlineHandleMessage(data){
 
     renderOnlineLobby();
 
-    if(data.state)onlineEnterMatch(data.state,data.revision||0);
+    if(data.state)onlineEnterMatch(data.state,data.revision||0,true);
 
     onlineScheduleSync(200);
 

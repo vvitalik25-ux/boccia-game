@@ -177,13 +177,14 @@ let puzzleSnapshot=null;
 let puzzleLastSuccess=false;
 let puzzleSerial=0;
 
+// Equal nominal mass; hardness changes energy loss and floor grip, not weight.
 const BALL_TYPES=[
-  {id:'superHard', label:'Super Hard', short:'SH', decel:.060, restitution:.58, damping:.95, mass:1.14},
-  {id:'hard', label:'Hard', short:'H', decel:.071, restitution:.51, damping:.93, mass:1.09},
-  {id:'medium', label:'Medium', short:'M', decel:.085, restitution:.43, damping:.89, mass:1.03},
-  {id:'mediumSoft', label:'Medium Soft', short:'MS', decel:.098, restitution:.35, damping:.85, mass:.99},
-  {id:'soft', label:'Soft', short:'S', decel:.113, restitution:.27, damping:.80, mass:.95},
-  {id:'superSoft', label:'Super Soft', short:'SS', decel:.130, restitution:.19, damping:.75, mass:.91}
+  {"id":"superHard","label":"Super Hard","short":"SH","decel":0.055,"restitution":0.72,"damping":0.99,"mass":1,"grip":0.03,"floorBounce":0.3},
+  {"id":"hard","label":"Hard","short":"H","decel":0.068,"restitution":0.56,"damping":0.97,"mass":1,"grip":0.12,"floorBounce":0.23},
+  {"id":"medium","label":"Medium","short":"M","decel":0.085,"restitution":0.38,"damping":0.93,"mass":1,"grip":0.3,"floorBounce":0.16},
+  {"id":"mediumSoft","label":"Medium Soft","short":"MS","decel":0.1,"restitution":0.22,"damping":0.87,"mass":1,"grip":0.65,"floorBounce":0.1},
+  {"id":"soft","label":"Soft","short":"S","decel":0.118,"restitution":0.1,"damping":0.78,"mass":1,"grip":1.05,"floorBounce":0.05},
+  {"id":"superSoft","label":"Super Soft","short":"SS","decel":0.135,"restitution":0.035,"damping":0.68,"mass":1,"grip":1.65,"floorBounce":0.02}
 ];
 const BALL_TYPE_MAP=Object.fromEntries(BALL_TYPES.map(t=>[t.id,t]));
 let ballInventory={red:[],blue:[]};

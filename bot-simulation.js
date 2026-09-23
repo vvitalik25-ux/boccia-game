@@ -50,7 +50,7 @@ function applyGravityAndFloor(b){
     if(b.z<0){
       b.z=0;
       if(Math.abs(b.vz)<.15)b.vz=0;
-      else b.vz*=-.14;
+      else b.vz*=-physicsFor(b).floorBounce;
     }
   }
 }
@@ -180,27 +180,39 @@ function resolve3DBallContact(a,b,sim=false){
 
   const nx=dx/(horiz||1),ny=dy/(horiz||1);
   const ma=pa.mass,mb=pb.mass,total=ma+mb;
+  const restA=Math.hypot(a.vx,a.vy)<.06&&(a.z||0)<a.r*.05;
+  const restB=Math.hypot(b.vx,b.vy)<.06&&(b.z||0)<b.r*.05;
+  // A settled soft ball absorbs small contacts through its floor contact patch.
+  const closing=Math.max(0,(a.vx-b.vx)*nx+(a.vy-b.vy)*ny);
+  const contactRestitution=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
+  const impulse=(1+contactRestitution)*closing/(1/ma+1/mb);
+  const heldA=restA&&impulse/ma*pa.damping<=pa.grip*a.r/9.216;
+  const heldB=restB&&impulse/mb*pb.damping<=pb.grip*b.r/9.216;
+  const mobilityA=heldA?0:1/ma,mobilityB=heldB?0:1/mb;
+  // Numerical overlap correction must not creep a ball held by floor friction.
+  const shareA=mobilityA+mobilityB>0?mobilityA/(mobilityA+mobilityB):.5,shareB=1-shareA;
   const overlap=min-d3;
 
   // If centres are already vertically offset, keep part of the overlap as height.
   const verticalShare=Math.min(.92,Math.abs(dz)/(min*.74));
   const elevated=Math.min(1,Math.max(a.z||0,b.z||0)/(min*.72));
   const horizontalPush=overlap*(1-verticalShare*.78)*(1-elevated*.58);
-  a.x-=nx*horizontalPush*(mb/total);a.y-=ny*horizontalPush*(mb/total);
-  b.x+=nx*horizontalPush*(ma/total);b.y+=ny*horizontalPush*(ma/total);
+  a.x-=nx*horizontalPush*shareA;a.y-=ny*horizontalPush*shareA;
+  b.x+=nx*horizontalPush*shareB;b.y+=ny*horizontalPush*shareB;
 
   const rvx=b.vx-a.vx,rvy=b.vy-a.vy;
   const along=rvx*nx+rvy*ny;
 
   if(along<0){
     const rel=Math.abs(along);
-    const e=(pa.restitution+pb.restitution)/2;
+    // The softer of the two surfaces dominates deformation losses.
+    const e=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
 
     // Enough closing speed + tight horizontal overlap can lift the incoming ball.
     // This gives real top-down "climbing" / piling instead of forcing all balls apart.
     const compact=horiz<min*.94;
     const climbThreshold=.55+((pa.restitution+pb.restitution)/2)*.45;
-    if(compact&&rel>climbThreshold){
+    if(compact&&rel>Math.max(3.2,climbThreshold)){
       const aSpeed=Math.hypot(a.vx,a.vy),bSpeed=Math.hypot(b.vx,b.vy);
       const mover=aSpeed>=bSpeed?a:b;
       const support=mover===a?b:a;
@@ -227,8 +239,16 @@ function resolve3DBallContact(a,b,sim=false){
     const imp=-(1+e)*along/(1/ma+1/mb);
     a.vx-=imp*nx/ma;a.vy-=imp*ny/ma;
     b.vx+=imp*nx/mb;b.vy+=imp*ny/mb;
-    const damp=Math.sqrt(pa.damping*pb.damping);
-    a.vx*=damp;a.vy*=damp;b.vx*=damp;b.vy*=damp;
+    a.vx*=pa.damping;a.vy*=pa.damping;
+    b.vx*=pb.damping;b.vy*=pb.damping;
+    // Floor impulse is limited: a strong hit still dislodges every ball.
+    for(const [ball,p,rest] of [[a,pa,restA],[b,pb,restB]]){
+      if(!rest)continue;
+      const speed=Math.hypot(ball.vx,ball.vy);
+      const remaining=Math.max(0,speed-p.grip*ball.r/9.216);
+      const keep=speed>0?remaining/speed:0;
+      ball.vx*=keep;ball.vy*=keep;
+    }
   }
 
   // Stable partial stacking: if a raised ball has another ball under it,

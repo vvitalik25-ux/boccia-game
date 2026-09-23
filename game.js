@@ -178,13 +178,14 @@ let puzzleSnapshot=null;
 let puzzleLastSuccess=false;
 let puzzleSerial=0;
 
+// Equal nominal mass; hardness changes energy loss and floor grip, not weight.
 const BALL_TYPES=[
-  {id:'superHard', label:'Super Hard', short:'SH', decel:.060, restitution:.58, damping:.95, mass:1.14},
-  {id:'hard', label:'Hard', short:'H', decel:.071, restitution:.51, damping:.93, mass:1.09},
-  {id:'medium', label:'Medium', short:'M', decel:.085, restitution:.43, damping:.89, mass:1.03},
-  {id:'mediumSoft', label:'Medium Soft', short:'MS', decel:.098, restitution:.35, damping:.85, mass:.99},
-  {id:'soft', label:'Soft', short:'S', decel:.113, restitution:.27, damping:.80, mass:.95},
-  {id:'superSoft', label:'Super Soft', short:'SS', decel:.130, restitution:.19, damping:.75, mass:.91}
+  {"id":"superHard","label":"Super Hard","short":"SH","decel":0.055,"restitution":0.72,"damping":0.99,"mass":1,"grip":0.03,"floorBounce":0.3},
+  {"id":"hard","label":"Hard","short":"H","decel":0.068,"restitution":0.56,"damping":0.97,"mass":1,"grip":0.12,"floorBounce":0.23},
+  {"id":"medium","label":"Medium","short":"M","decel":0.085,"restitution":0.38,"damping":0.93,"mass":1,"grip":0.3,"floorBounce":0.16},
+  {"id":"mediumSoft","label":"Medium Soft","short":"MS","decel":0.1,"restitution":0.22,"damping":0.87,"mass":1,"grip":0.65,"floorBounce":0.1},
+  {"id":"soft","label":"Soft","short":"S","decel":0.118,"restitution":0.1,"damping":0.78,"mass":1,"grip":1.05,"floorBounce":0.05},
+  {"id":"superSoft","label":"Super Soft","short":"SS","decel":0.135,"restitution":0.035,"damping":0.68,"mass":1,"grip":1.65,"floorBounce":0.02}
 ];
 const BALL_TYPE_MAP=Object.fromEntries(BALL_TYPES.map(t=>[t.id,t]));
 let ballInventory={red:[],blue:[]};
@@ -3246,7 +3247,7 @@ function applyGravityAndFloor(b){
     if(b.z<0){
       b.z=0;
       if(Math.abs(b.vz)<.15)b.vz=0;
-      else b.vz*=-.14;
+      else b.vz*=-physicsFor(b).floorBounce;
     }
   }
 }
@@ -3376,27 +3377,39 @@ function resolve3DBallContact(a,b,sim=false){
 
   const nx=dx/(horiz||1),ny=dy/(horiz||1);
   const ma=pa.mass,mb=pb.mass,total=ma+mb;
+  const restA=Math.hypot(a.vx,a.vy)<.06&&(a.z||0)<a.r*.05;
+  const restB=Math.hypot(b.vx,b.vy)<.06&&(b.z||0)<b.r*.05;
+  // A settled soft ball absorbs small contacts through its floor contact patch.
+  const closing=Math.max(0,(a.vx-b.vx)*nx+(a.vy-b.vy)*ny);
+  const contactRestitution=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
+  const impulse=(1+contactRestitution)*closing/(1/ma+1/mb);
+  const heldA=restA&&impulse/ma*pa.damping<=pa.grip*a.r/9.216;
+  const heldB=restB&&impulse/mb*pb.damping<=pb.grip*b.r/9.216;
+  const mobilityA=heldA?0:1/ma,mobilityB=heldB?0:1/mb;
+  // Numerical overlap correction must not creep a ball held by floor friction.
+  const shareA=mobilityA+mobilityB>0?mobilityA/(mobilityA+mobilityB):.5,shareB=1-shareA;
   const overlap=min-d3;
 
   // If centres are already vertically offset, keep part of the overlap as height.
   const verticalShare=Math.min(.92,Math.abs(dz)/(min*.74));
   const elevated=Math.min(1,Math.max(a.z||0,b.z||0)/(min*.72));
   const horizontalPush=overlap*(1-verticalShare*.78)*(1-elevated*.58);
-  a.x-=nx*horizontalPush*(mb/total);a.y-=ny*horizontalPush*(mb/total);
-  b.x+=nx*horizontalPush*(ma/total);b.y+=ny*horizontalPush*(ma/total);
+  a.x-=nx*horizontalPush*shareA;a.y-=ny*horizontalPush*shareA;
+  b.x+=nx*horizontalPush*shareB;b.y+=ny*horizontalPush*shareB;
 
   const rvx=b.vx-a.vx,rvy=b.vy-a.vy;
   const along=rvx*nx+rvy*ny;
 
   if(along<0){
     const rel=Math.abs(along);
-    const e=(pa.restitution+pb.restitution)/2;
+    // The softer of the two surfaces dominates deformation losses.
+    const e=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
 
     // Enough closing speed + tight horizontal overlap can lift the incoming ball.
     // This gives real top-down "climbing" / piling instead of forcing all balls apart.
     const compact=horiz<min*.94;
     const climbThreshold=.55+((pa.restitution+pb.restitution)/2)*.45;
-    if(compact&&rel>climbThreshold){
+    if(compact&&rel>Math.max(3.2,climbThreshold)){
       const aSpeed=Math.hypot(a.vx,a.vy),bSpeed=Math.hypot(b.vx,b.vy);
       const mover=aSpeed>=bSpeed?a:b;
       const support=mover===a?b:a;
@@ -3423,8 +3436,16 @@ function resolve3DBallContact(a,b,sim=false){
     const imp=-(1+e)*along/(1/ma+1/mb);
     a.vx-=imp*nx/ma;a.vy-=imp*ny/ma;
     b.vx+=imp*nx/mb;b.vy+=imp*ny/mb;
-    const damp=Math.sqrt(pa.damping*pb.damping);
-    a.vx*=damp;a.vy*=damp;b.vx*=damp;b.vy*=damp;
+    a.vx*=pa.damping;a.vy*=pa.damping;
+    b.vx*=pb.damping;b.vy*=pb.damping;
+    // Floor impulse is limited: a strong hit still dislodges every ball.
+    for(const [ball,p,rest] of [[a,pa,restA],[b,pb,restB]]){
+      if(!rest)continue;
+      const speed=Math.hypot(ball.vx,ball.vy);
+      const remaining=Math.max(0,speed-p.grip*ball.r/9.216);
+      const keep=speed>0?remaining/speed:0;
+      ball.vx*=keep;ball.vy*=keep;
+    }
   }
 
   // Stable partial stacking: if a raised ball has another ball under it,

@@ -184,10 +184,14 @@ function resolve3DBallContact(a,b,sim=false){
   const restB=Math.hypot(b.vx,b.vy)<.06&&(b.z||0)<b.r*.05;
   // A settled soft ball absorbs small contacts through its floor contact patch.
   const closing=Math.max(0,(a.vx-b.vx)*nx+(a.vy-b.vy)*ny);
-  const contactRestitution=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
+  // Grounded SH drives transfer more normal impulse instead of losing it to a hop.
+  const shDrive=((a.hardnessId==='superHard'&&restB)||(b.hardnessId==='superHard'&&restA))&&(a.z||0)<a.r*.05&&(b.z||0)<b.r*.05;
+  const drive=shDrive?Math.max(0,Math.min(1,(closing-2)/4)):0;
+  const contactRestitution=(2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution))*(1-drive)+Math.max(pa.restitution,pb.restitution)*drive;
+  const dampingA=pa.damping+(1-pa.damping)*drive,dampingB=pb.damping+(1-pb.damping)*drive;
   const impulse=(1+contactRestitution)*closing/(1/ma+1/mb);
-  const heldA=restA&&impulse/ma*pa.damping<=pa.grip*a.r/9.216;
-  const heldB=restB&&impulse/mb*pb.damping<=pb.grip*b.r/9.216;
+  const heldA=restA&&impulse/ma*dampingA<=pa.grip*a.r/9.216;
+  const heldB=restB&&impulse/mb*dampingB<=pb.grip*b.r/9.216;
   const mobilityA=heldA?0:1/ma,mobilityB=heldB?0:1/mb;
   // Numerical overlap correction must not creep a ball held by floor friction.
   const shareA=mobilityA+mobilityB>0?mobilityA/(mobilityA+mobilityB):.5,shareB=1-shareA;
@@ -206,13 +210,13 @@ function resolve3DBallContact(a,b,sim=false){
   if(along<0){
     const rel=Math.abs(along);
     // The softer of the two surfaces dominates deformation losses.
-    const e=2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution);
+    const e=contactRestitution;
 
     // Enough closing speed + tight horizontal overlap can lift the incoming ball.
     // This gives real top-down "climbing" / piling instead of forcing all balls apart.
     const compact=horiz<min*.94;
     const climbThreshold=.55+((pa.restitution+pb.restitution)/2)*.45;
-    if(compact&&rel>Math.max(3.2,climbThreshold)){
+    if(compact&&drive===0&&rel>Math.max(3.2,climbThreshold)){
       const aSpeed=Math.hypot(a.vx,a.vy),bSpeed=Math.hypot(b.vx,b.vy);
       const mover=aSpeed>=bSpeed?a:b;
       const support=mover===a?b:a;
@@ -239,8 +243,8 @@ function resolve3DBallContact(a,b,sim=false){
     const imp=-(1+e)*along/(1/ma+1/mb);
     a.vx-=imp*nx/ma;a.vy-=imp*ny/ma;
     b.vx+=imp*nx/mb;b.vy+=imp*ny/mb;
-    a.vx*=pa.damping;a.vy*=pa.damping;
-    b.vx*=pb.damping;b.vy*=pb.damping;
+    a.vx*=dampingA;a.vy*=dampingA;
+    b.vx*=dampingB;b.vy*=dampingB;
     // Floor impulse is limited: a strong hit still dislodges every ball.
     for(const [ball,p,rest] of [[a,pa,restA],[b,pb,restB]]){
       if(!rest)continue;

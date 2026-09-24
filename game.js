@@ -3543,8 +3543,10 @@ function botContext(side){
   const opp=opponent(side);
   const own=balls.filter(b=>b.kind===side);
   const enemies=balls.filter(b=>b.kind===opp);
-  const ownD=own.length?Math.min(...own.map(b=>dist(b,jack))):Infinity;
-  const enemyD=enemies.length?Math.min(...enemies.map(b=>dist(b,jack))):Infinity;
+  // Finite sentinel: Infinity makes all first-shot scores tie (Infinity - Infinity).
+  const emptyDistance=Math.hypot(court().w,court().h)+ballR()*2;
+  const ownD=own.length?Math.min(...own.map(b=>dist(b,jack))):emptyDistance;
+  const enemyD=enemies.length?Math.min(...enemies.map(b=>dist(b,jack))):emptyDistance;
   return{opp,own,enemies,ownD,enemyD,losing:ownD>=enemyD};
 }
 function botTargetRepeatPenalty(side,cand){
@@ -3978,11 +3980,11 @@ function chooseBestBotShot(side){
   }
 
   const danger=enemies.slice().sort((a,b)=>dist(a,jack)-dist(b,jack)).slice(0,4);
-  const hitTypes=pick(['superHard','hard','medium']).slice(0,profile.hitTake);
+  const hitTypes=pick(['superHard','hard','medium','mediumSoft','soft','superSoft']).slice(0,profile.hitTake);
   if(ctx.losing||danger.length){
     for(const hard of hitTypes){
       for(const r of danger){
-        for(const scale of [1.00,1.06,1.12]){
+        for(const scale of [1.06,1.18,1.35,1.55]){
           pushBotCandidate(candidates,seen,makeCandidateTo(r.x,r.y,scale,side,hard));
           pushBotCandidate(candidates,seen,makeCandidateTo(r.x-ballR()*.42,r.y,scale,side,hard));
           pushBotCandidate(candidates,seen,makeCandidateTo(r.x+ballR()*.42,r.y,scale,side,hard));

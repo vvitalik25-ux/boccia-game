@@ -3385,7 +3385,7 @@ function resolve3DBallContact(a,b,sim=false){
   const closing=Math.max(0,(a.vx-b.vx)*nx+(a.vy-b.vy)*ny);
   // Grounded SH drives transfer more normal impulse instead of losing it to a hop.
   const shDrive=((a.hardnessId==='superHard'&&restB)||(b.hardnessId==='superHard'&&restA))&&(a.z||0)<a.r*.05&&(b.z||0)<b.r*.05;
-  const drive=shDrive?Math.max(0,Math.min(1,(closing-2)/4)):0;
+  const drive=shDrive?Math.max(0,Math.min(1,(closing-2)/4))*.3:0;
   const contactRestitution=(2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution))*(1-drive)+Math.max(pa.restitution,pb.restitution)*drive;
   const dampingA=pa.damping+(1-pa.damping)*drive,dampingB=pb.damping+(1-pb.damping)*drive;
   const impulse=(1+contactRestitution)*closing/(1/ma+1/mb);

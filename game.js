@@ -184,8 +184,8 @@ const BALL_TYPES=[
   {"id":"hard","label":"Hard","short":"H","decel":0.068,"restitution":0.56,"damping":0.97,"mass":1,"grip":0.12,"floorBounce":0.23},
   {"id":"medium","label":"Medium","short":"M","decel":0.085,"restitution":0.38,"damping":0.93,"mass":1,"grip":0.3,"floorBounce":0.16},
   {"id":"mediumSoft","label":"Medium Soft","short":"MS","decel":0.1,"restitution":0.22,"damping":0.87,"mass":1,"grip":0.65,"floorBounce":0.1},
-  {"id":"soft","label":"Soft","short":"S","decel":0.118,"restitution":0.1,"damping":0.78,"mass":1,"grip":1.05,"floorBounce":0.05},
-  {"id":"superSoft","label":"Super Soft","short":"SS","decel":0.122,"restitution":0.035,"damping":0.78,"mass":1,"grip":0.75,"floorBounce":0.02}
+  {"id":"soft","label":"Soft","short":"S","decel":0.118,"restitution":0.1,"damping":0.78,"mass":1,"grip":0.22,"floorBounce":0.05},
+  {"id":"superSoft","label":"Super Soft","short":"SS","decel":0.122,"restitution":0.035,"damping":0.78,"mass":1,"grip":0.35,"floorBounce":0.02}
 ];
 const BALL_TYPE_MAP=Object.fromEntries(BALL_TYPES.map(t=>[t.id,t]));
 let ballInventory={red:[],blue:[]};
@@ -3865,7 +3865,7 @@ function scoreBotCandidate(st,side,cand,ctx,profile){
   const nEnemy=enemyAfter.length?Math.min(...enemyAfter.map(b=>simDist(b,st.jack))):9999;
 
   if(ctx.losing){
-    score+=(ctx.enemyD-nEnemy)*1.5;
+    score+=(Math.min(nEnemy,Math.hypot(court().w,court().h))-ctx.enemyD)*1.5;
     score+=(ctx.ownD-nOwn)*5.1;
     if(nOwn<nEnemy)score+=240;
     if(pts[side]>pts[opp])score+=170;

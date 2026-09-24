@@ -357,7 +357,7 @@ function scoreBotCandidate(st,side,cand,ctx,profile){
   const nEnemy=enemyAfter.length?Math.min(...enemyAfter.map(b=>simDist(b,st.jack))):9999;
 
   if(ctx.losing){
-    score+=(ctx.enemyD-nEnemy)*1.5;
+    score+=(Math.min(nEnemy,Math.hypot(court().w,court().h))-ctx.enemyD)*1.5;
     score+=(ctx.ownD-nOwn)*5.1;
     if(nOwn<nEnemy)score+=240;
     if(pts[side]>pts[opp])score+=170;

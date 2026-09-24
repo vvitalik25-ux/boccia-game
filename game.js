@@ -3132,10 +3132,12 @@ function updateUI(){
   renderBallSelector();
   if(phase==='trainingEdit')renderTrainingEditorUI();
 }
-function speedFromPower(){
+function speedFromPower(hardnessId='medium'){
   const c=court();
   const baselineDecel=BALL_TYPE_MAP.medium.decel;
-  const min=4.3,max=Math.sqrt(2*baselineDecel*c.h*.96)*1.12;
+  // Extra top-end force for takeouts; retain the same minimum for gentle shots.
+  const driveBoost=hardnessId==='superHard'?1.18:hardnessId==='hard'?1.12:1;
+  const min=4.3,max=Math.sqrt(2*baselineDecel*c.h*.96)*1.12*driveBoost;
   return min+(max-min)*aimPower;
 }
 function launchHuman(){
@@ -3154,8 +3156,8 @@ function launchHuman(){
     return;
   }
 
-  const pos=launcherFor(side),a=aimAngle*Math.PI/180,speed=speedFromPower();
   const hardnessId=kind==='colour'?ensureSelectedBall(side):(jackHardness[side]||'soft');
+  const pos=launcherFor(side),a=aimAngle*Math.PI/180,speed=speedFromPower(kind==='colour'?hardnessId:'medium');
   const launch=applyRealismToLaunch(Math.sin(a)*speed,-Math.cos(a)*speed,kind==='jack'?'jack':side,hardnessId);
   const b=spawnBall(kind==='jack'?'jack':side,side,pos.x,pos.y,launch.vx,launch.vy,hardnessId);
 

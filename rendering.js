@@ -163,7 +163,7 @@ function drawBall(b){
   ctx.restore();
 }
 function drawLauncher(side,dim=false){
-  const pos=launcherFor(side),kind=(phase==='jackRed'||phase==='jackBlue')?'jack':side;
+  const pos=playerPreviewBallPosition(side,dim),kind=(phase==='jackRed'||phase==='jackBlue')?'jack':side;
   const previewHardness=kind==='jack'?(jackHardness[side]||'soft'):ensureSelectedBall(side);
   ctx.save();ctx.globalAlpha=dim?.55:1;
 
@@ -181,7 +181,7 @@ function drawLauncher(side,dim=false){
 }
 function drawAim(side){
   if(realisticMode)return;
-  const pos=launcherFor(side),a=aimAngle*Math.PI/180,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
+  const pos=playerPreviewBallPosition(side,false),a=aimAngle*Math.PI/180,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
   ctx.save();ctx.setLineDash([6,6]);ctx.strokeStyle='rgba(255,255,255,.84)';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(pos.x,pos.y);ctx.lineTo(pos.x+nx*len,pos.y+ny*len);ctx.stroke();ctx.setLineDash([]);
   const ex=pos.x+nx*len,ey=pos.y+ny*len;ctx.fillStyle='rgba(255,255,255,.92)';ctx.beginPath();
@@ -191,11 +191,8 @@ function drawAim(side){
 // A compact top-down athlete, kept entirely inside the current throwing box.
 // Appearance is local presentation; it never changes launch physics.
 function drawPlayerIcon(side,pos,dim,box){
-  const c=court(),bw=c.w/6;
-  const radius=bw*.43,left=c.x+bw*(box-1),top=my(10),bottom=my(12.5);
-  const x=Math.max(left+radius,Math.min(left+bw-radius,pos.x));
-  const y=Math.max(top+radius,Math.min(bottom-radius,pos.y+bw*.48));
-  ctx.save();ctx.globalAlpha=dim?.70:1;ctx.translate(x,y);ctx.rotate(dim?0:aimAngle*Math.PI/180);ctx.scale(bw*.48,bw*.48);
+  const pose=playerIconPose(pos,dim,box);
+  ctx.save();ctx.globalAlpha=dim?.70:1;ctx.translate(pose.x,pose.y);ctx.rotate(pose.angle);ctx.scale(pose.scale,pose.scale);
   ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=.08;
   ctx.fillStyle='#263342';ctx.strokeStyle='#dae3e9';
   // Wheels, seat and backrest.
@@ -207,11 +204,24 @@ function drawPlayerIcon(side,pos,dim,box){
   ctx.strokeStyle='#efc7a1';ctx.lineWidth=.13;
   ctx.beginPath();ctx.moveTo(-.27,-.17);ctx.lineTo(-.37,-.52);ctx.moveTo(.27,-.17);ctx.lineTo(.37,-.52);ctx.stroke();
   if(playerAppearance==='ramp'){
-    ctx.fillStyle='#c7d1d8';ctx.strokeStyle='#465667';ctx.lineWidth=.04;
-    ctx.beginPath();ctx.moveTo(-.19,.18);ctx.lineTo(-.13,-.80);ctx.lineTo(.13,-.80);ctx.lineTo(.19,.18);ctx.closePath();ctx.fill();ctx.stroke();
-    ctx.strokeStyle='#738594';ctx.beginPath();ctx.moveTo(0,.12);ctx.lineTo(0,-.75);ctx.stroke();
+    ctx.fillStyle='#e1bc76';ctx.strokeStyle='#503d23';ctx.lineWidth=.07;
+    ctx.beginPath();ctx.moveTo(-.47,-.38);ctx.lineTo(-.44,-1.48);ctx.lineTo(.44,-1.48);ctx.lineTo(.47,-.38);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.strokeStyle='#fff0bd';ctx.lineWidth=.05;ctx.beginPath();ctx.moveTo(-.36,-.42);ctx.lineTo(-.33,-1.42);ctx.moveTo(.36,-.42);ctx.lineTo(.33,-1.42);ctx.stroke();
   }
   ctx.fillStyle='#efc7a1';ctx.strokeStyle='#493b34';ctx.lineWidth=.035;
   ctx.beginPath();ctx.arc(0,-.24,.22,0,Math.PI*2);ctx.fill();ctx.stroke();
   ctx.restore();
+}
+
+function playerIconPose(pos,dim,box){
+  const c=court(),bw=c.w/6,radius=bw*.49,left=c.x+bw*(box-1);
+  return{x:Math.max(left+radius,Math.min(left+bw-radius,pos.x)),
+    y:Math.max(my(10)+radius,Math.min(my(12.5)-radius,pos.y+bw*.35)),
+    scale:bw*.30,angle:dim?0:aimAngle*Math.PI/180};
+}
+function playerPreviewBallPosition(side,dim=false){
+  const box=(phase==='jackRed'||phase==='jackBlue')?currentJackBox:activePlayerBox[side];
+  const pose=playerIconPose(launcherFor(side),dim,box);
+  const reach=pose.scale*(playerAppearance==='ramp'?1.02:.72);
+  return{x:pose.x+Math.sin(pose.angle)*reach,y:pose.y-Math.cos(pose.angle)*reach};
 }

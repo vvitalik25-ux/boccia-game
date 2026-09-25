@@ -200,7 +200,7 @@ function launchHuman(){
   }
 
   const hardnessId=kind==='colour'?ensureSelectedBall(side):(jackHardness[side]||'soft');
-  const pos=launcherFor(side),a=aimAngle*Math.PI/180,speed=speedFromPower(kind==='colour'?hardnessId:'medium');
+  const pos=playerPreviewBallPosition(side),a=aimAngle*Math.PI/180,speed=speedFromPower(kind==='colour'?hardnessId:'medium');
   const launch=applyRealismToLaunch(Math.sin(a)*speed,-Math.cos(a)*speed,kind==='jack'?'jack':side,hardnessId);
   const b=spawnBall(kind==='jack'?'jack':side,side,pos.x,pos.y,launch.vx,launch.vy,hardnessId);
 

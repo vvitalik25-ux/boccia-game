@@ -3383,11 +3383,18 @@ function resolve3DBallContact(a,b,sim=false){
   const restB=Math.hypot(b.vx,b.vy)<.06&&(b.z||0)<b.r*.05;
   // A settled soft ball absorbs small contacts through its floor contact patch.
   const closing=Math.max(0,(a.vx-b.vx)*nx+(a.vy-b.vy)*ny);
+  const relativeSpeed=Math.hypot(a.vx-b.vx,a.vy-b.vy);
+  const alignment=relativeSpeed>0?Math.min(1,closing/relativeSpeed):0;
+  const grounded=(a.z||0)<a.r*.05&&(b.z||0)<b.r*.05;
+  // A grazing hit on a settled SS loses more energy through deformation.
+  const sideRetention=1-.45*(1-alignment*alignment);
+  const grazeA=restA&&grounded&&a.hardnessId==='superSoft'?sideRetention:1;
+  const grazeB=restB&&grounded&&b.hardnessId==='superSoft'?sideRetention:1;
   // Grounded SH drives transfer more normal impulse instead of losing it to a hop.
   const shDrive=((a.hardnessId==='superHard'&&restB)||(b.hardnessId==='superHard'&&restA))&&(a.z||0)<a.r*.05&&(b.z||0)<b.r*.05;
-  const drive=shDrive?Math.max(0,Math.min(1,(closing-2)/4))*.3:0;
+  const drive=shDrive?Math.max(0,Math.min(1,(closing-2)/4))*.3*Math.pow(alignment,4):0;
   const contactRestitution=(2*pa.restitution*pb.restitution/(pa.restitution+pb.restitution))*(1-drive)+Math.max(pa.restitution,pb.restitution)*drive;
-  const dampingA=pa.damping+(1-pa.damping)*drive,dampingB=pb.damping+(1-pb.damping)*drive;
+  const dampingA=(pa.damping+(1-pa.damping)*drive)*grazeA,dampingB=(pb.damping+(1-pb.damping)*drive)*grazeB;
   const impulse=(1+contactRestitution)*closing/(1/ma+1/mb);
   const heldA=restA&&impulse/ma*dampingA<=pa.grip*a.r/9.216;
   const heldB=restB&&impulse/mb*dampingB<=pb.grip*b.r/9.216;

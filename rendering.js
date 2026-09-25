@@ -103,8 +103,7 @@ function draw(){
   }
 
   if(active){
-    if(humanTurn()){drawLauncher(active);drawAim(active)}
-    else{drawLauncher(active,true)}
+    if(humanTurn())drawAim(active);
   }
 }
 function worldToScreen(x,y){
@@ -162,23 +161,6 @@ function drawBall(b){
   }
   ctx.restore();
 }
-function drawLauncher(side,dim=false){
-  const pos=playerPreviewBallPosition(side,dim),kind=(phase==='jackRed'||phase==='jackBlue')?'jack':side;
-  const previewHardness=kind==='jack'?(jackHardness[side]||'soft'):ensureSelectedBall(side);
-  ctx.save();ctx.globalAlpha=dim?.55:1;
-
-  // Position marker: this is where the athlete is currently placed inside the box.
-  ctx.strokeStyle='rgba(255,255,255,.65)';
-  ctx.lineWidth=1.5;
-  ctx.setLineDash([4,4]);
-  if(!realisticMode){ctx.beginPath();ctx.arc(pos.x,pos.y,ballR()+6,0,Math.PI*2);ctx.stroke();}
-  ctx.setLineDash([]);
-
-  ctx.fillStyle=side==='red'?'rgba(239,77,91,.18)':'rgba(79,137,255,.18)';
-  ctx.beginPath();ctx.arc(pos.x,pos.y,ballR()+4,0,Math.PI*2);ctx.fill();
-  drawBall({x:pos.x,y:pos.y,z:0,r:ballR(),kind:kind==='red'?'red':kind==='blue'?'blue':'jack',hardnessId:previewHardness});
-  ctx.restore();
-}
 function drawAim(side){
   if(realisticMode)return;
   const pos=playerPreviewBallPosition(side,false),a=aimAngle*Math.PI/180,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
@@ -188,25 +170,27 @@ function drawAim(side){
   ctx.moveTo(ex,ey);ctx.lineTo(ex-nx*12-ny*6,ey-ny*12+nx*6);ctx.lineTo(ex-nx*12+ny*6,ey-ny*12-nx*6);ctx.closePath();ctx.fill();ctx.restore();
 }
 
-// A compact top-down athlete, kept entirely inside the current throwing box.
-// Appearance is local presentation; it never changes launch physics.
+// Top-down chair scaled against the one-metre throwing box.
 function drawPlayerIcon(side,pos,dim,box){
   const pose=playerIconPose(pos,dim,box);
   ctx.save();ctx.globalAlpha=dim?.70:1;ctx.translate(pose.x,pose.y);ctx.rotate(pose.angle);ctx.scale(pose.scale,pose.scale);
   ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=.08;
   ctx.fillStyle='#263342';ctx.strokeStyle='#dae3e9';
   // Wheels, seat and backrest.
-  ctx.fillRect(-.62,-.28,.16,.78);ctx.strokeRect(-.62,-.28,.16,.78);
-  ctx.fillRect(.46,-.28,.16,.78);ctx.strokeRect(.46,-.28,.16,.78);
+  ctx.fillRect(-.62,-.55,.16,1.15);ctx.strokeRect(-.62,-.55,.16,1.15);
+  ctx.fillRect(.46,-.55,.16,1.15);ctx.strokeRect(.46,-.55,.16,1.15);
   ctx.fillStyle=side==='red'?'#ec5265':'#568ff4';ctx.fillRect(-.38,-.28,.76,.68);
   ctx.strokeStyle='#172333';ctx.beginPath();ctx.moveTo(-.39,.46);ctx.lineTo(.39,.46);ctx.stroke();
+  // Footrest and small front casters complete the chair silhouette.
+  ctx.fillStyle='#354454';ctx.fillRect(-.27,-.92,.54,.35);
+  ctx.fillStyle='#172333';ctx.fillRect(-.42,-1.0,.12,.28);ctx.fillRect(.30,-1.0,.12,.28);
   // Shoulders and hands identify the forward direction without an aim line.
   ctx.strokeStyle='#efc7a1';ctx.lineWidth=.13;
   ctx.beginPath();ctx.moveTo(-.27,-.17);ctx.lineTo(-.37,-.52);ctx.moveTo(.27,-.17);ctx.lineTo(.37,-.52);ctx.stroke();
   if(playerAppearance==='ramp'){
     ctx.fillStyle='#e1bc76';ctx.strokeStyle='#503d23';ctx.lineWidth=.07;
-    ctx.beginPath();ctx.moveTo(-.47,-.38);ctx.lineTo(-.44,-1.48);ctx.lineTo(.44,-1.48);ctx.lineTo(.47,-.38);ctx.closePath();ctx.fill();ctx.stroke();
-    ctx.strokeStyle='#fff0bd';ctx.lineWidth=.05;ctx.beginPath();ctx.moveTo(-.36,-.42);ctx.lineTo(-.33,-1.42);ctx.moveTo(.36,-.42);ctx.lineTo(.33,-1.42);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(-.22,-.72);ctx.lineTo(-.20,-1.52);ctx.lineTo(.20,-1.52);ctx.lineTo(.22,-.72);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.strokeStyle='#fff0bd';ctx.lineWidth=.05;ctx.beginPath();ctx.moveTo(-.14,-.76);ctx.lineTo(-.12,-1.48);ctx.moveTo(.14,-.76);ctx.lineTo(.12,-1.48);ctx.stroke();
   }
   ctx.fillStyle='#efc7a1';ctx.strokeStyle='#493b34';ctx.lineWidth=.035;
   ctx.beginPath();ctx.arc(0,-.24,.22,0,Math.PI*2);ctx.fill();ctx.stroke();
@@ -214,14 +198,20 @@ function drawPlayerIcon(side,pos,dim,box){
 }
 
 function playerIconPose(pos,dim,box){
-  const c=court(),bw=c.w/6,radius=bw*.49,left=c.x+bw*(box-1);
-  return{x:Math.max(left+radius,Math.min(left+bw-radius,pos.x)),
-    y:Math.max(my(10)+radius,Math.min(my(12.5)-radius,pos.y+bw*.35)),
-    scale:bw*.30,angle:dim?0:aimAngle*Math.PI/180};
+  const c=court(),bw=c.w/6,left=c.x+bw*(box-1),angle=dim?0:aimAngle*Math.PI/180;
+  // Fixed chair scale. Only chair wheels/footrest constrain placement; the ramp may protrude.
+  const co=Math.cos(angle),si=Math.sin(angle);
+  const corners=[[-.66,-.59],[.66,-.59],[-.66,.64],[.66,.64],[-.46,-1.04],[.46,-1.04]];
+  const xs=corners.map(([x,y])=>x*co-y*si),ys=corners.map(([x,y])=>x*si+y*co);
+  const scale=bw*.48;
+  const minX=Math.min(...xs)*scale,maxX=Math.max(...xs)*scale;
+  const minY=Math.min(...ys)*scale,maxY=Math.max(...ys)*scale;
+  return{x:Math.max(left-minX,Math.min(left+bw-maxX,pos.x)),
+    y:Math.max(my(10)-minY,Math.min(my(12.5)-maxY,pos.y+bw*.35)),scale,angle};
 }
 function playerPreviewBallPosition(side,dim=false){
   const box=(phase==='jackRed'||phase==='jackBlue')?currentJackBox:activePlayerBox[side];
   const pose=playerIconPose(launcherFor(side),dim,box);
-  const reach=pose.scale*(playerAppearance==='ramp'?1.02:.72);
+  const reach=pose.scale*(playerAppearance==='ramp'?1.52:.85);
   return{x:pose.x+Math.sin(pose.angle)*reach,y:pose.y-Math.cos(pose.angle)*reach};
 }

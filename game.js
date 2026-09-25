@@ -4996,13 +4996,15 @@ function drawPlayerIcon(side,pos,dim,box){
 
 function playerIconPose(pos,dim,box){
   const c=court(),bw=c.w/6,left=c.x+bw*(box-1),angle=dim?0:aimAngle*Math.PI/180;
-  // Fixed chair scale. Only chair wheels/footrest constrain placement; the ramp may protrude.
+  // Side bounds constrain the chair only; the front line also constrains the ramp.
   const co=Math.cos(angle),si=Math.sin(angle);
   const corners=[[-.66,-.59],[.66,-.59],[-.66,.64],[.66,.64],[-.46,-1.04],[.46,-1.04]];
   const xs=corners.map(([x,y])=>x*co-y*si),ys=corners.map(([x,y])=>x*si+y*co);
   const scale=bw*.48;
   const minX=Math.min(...xs)*scale,maxX=Math.max(...xs)*scale;
-  const minY=Math.min(...ys)*scale,maxY=Math.max(...ys)*scale;
+  const rampYs=playerAppearance==='ramp'
+    ?[[-.255,-.755],[.255,-.755],[-.235,-1.555],[.235,-1.555]].map(([x,y])=>x*si+y*co):[];
+  const minY=Math.min(...ys,...rampYs)*scale,maxY=Math.max(...ys)*scale;
   return{x:Math.max(left-minX,Math.min(left+bw-maxX,pos.x)),
     y:Math.max(my(10)-minY,Math.min(my(12.5)-maxY,pos.y+bw*.35)),scale,angle};
 }

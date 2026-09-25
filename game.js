@@ -3560,7 +3560,7 @@ function botContext(side){
   const emptyDistance=Math.hypot(court().w,court().h)+ballR()*2;
   const ownD=own.length?Math.min(...own.map(b=>dist(b,jack))):emptyDistance;
   const enemyD=enemies.length?Math.min(...enemies.map(b=>dist(b,jack))):emptyDistance;
-  return{opp,own,enemies,ownD,enemyD,losing:ownD>=enemyD};
+  return{opp,own,enemies,ownD,enemyD,losing:enemies.length>0&&ownD>=enemyD};
 }
 function botTargetRepeatPenalty(side,cand){
   const history=botTargetHistory[side]||[];
@@ -3979,7 +3979,8 @@ function chooseBestBotShot(side){
     if(forcedBreak)return forcedBreak;
   }
 
-  const drawTypes=pick(['superSoft','soft','mediumSoft','medium']).slice(0,profile.drawTake);
+  const softDrawTypes=pick(['superSoft','soft','mediumSoft','medium']);
+  const drawTypes=(softDrawTypes.length?softDrawTypes:pick(['hard','superHard'])).slice(0,profile.drawTake);
   const drawOffsets=[
     [0,0],[-.42,0],[.42,0],[0,.52],[0,.95],
     [-.75,.42],[.75,.42],[-1.05,.72],[1.05,.72]
@@ -4117,7 +4118,7 @@ function chooseBestBotShot(side){
 
   const best=ranked[0];
   if(!best||best.score<-2500){
-    const hard=pick(['superHard','hard','medium'])[0]||available[0]||'medium';
+    const hard=(danger.length?pick(['superHard','hard','medium'])[0]:drawTypes[0])||available[0]||'medium';
     const target=danger[0]||jack;
     return makeCandidateTo(target.x,target.y,1.04,side,hard);
   }

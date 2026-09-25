@@ -129,6 +129,7 @@ let setupTimers=[];
 let launcherPositions={1:{u:.5,v:.54},2:{u:.5,v:.54},3:{u:.5,v:.54},4:{u:.5,v:.54},5:{u:.5,v:.54},6:{u:.5,v:.54}};
 let preStartPause=false;
 let realisticMode=false;
+let playerAppearance='wheelchair';
 let botDifficulty='expert';
 const BOT_LEVELS={
   easy:{
@@ -204,7 +205,6 @@ let allocationSelectedBox=null;
 let allocationWorking={};
 let ballAllocation={red:{3:[]},blue:{4:[]}};
 const minSpeed=.045;
-
 function realismSoftnessFactor(hardnessId=null){
   const map={superHard:.45,hard:.58,medium:.72,mediumSoft:.87,soft:1.02,superSoft:1.18};
   return map[hardnessId||'soft']??1.02;
@@ -306,8 +306,8 @@ function renderFormatButtons(){
   }
   if(realismInfoEl){
     realismInfoEl.textContent=realisticMode
-      ?'Режим включён: мячи могут немного уводить из-за неровного пола и формы мяча. Мягкие мячи чувствительнее, жёсткие стабильнее.'
-      :'Без случайных уходов. В реалистичном режиме мячи могут немного отклоняться.';
+      ?'Линия прицела скрыта: ориентируйтесь по игроку или желобу. Мячи могут немного отклоняться из-за неровного пола и формы мяча.'
+      :'Прицел виден, случайных уходов нет. В реалистичном режиме прицел скрыт, мячи могут немного отклоняться.';
   }
 
   aiEasyBtn?.classList.toggle('selected',botDifficulty==='easy');
@@ -322,7 +322,6 @@ function renderFormatButtons(){
 
   renderFieldOrientation();
 }
-
 function court(){
   const ratio=12.5/6,pad=7,aw=W-pad*2,ah=H-pad*2;
   let cw=aw,ch=cw*ratio;
@@ -4866,11 +4865,19 @@ function draw(){
   ctx.font=`900 ${Math.max(7,c.w*.024)}px system-ui`;
   for(const box of redBoxes){
     const n=redBoxes.indexOf(box)+1;
-    ctx.fillStyle='#ffd6da';fillWorldText(redBoxes.length===1?shortOwner('red'):`R${n}`,c.x+bw*(box-.5),my(11.65));
+    ctx.fillStyle='#ffd6da';fillWorldText(redBoxes.length===1?shortOwner('red'):`R${n}`,c.x+bw*(box-.5),my(10.3));
   }
   for(const box of blueBoxes){
     const n=blueBoxes.indexOf(box)+1;
-    ctx.fillStyle='#d8e6ff';fillWorldText(blueBoxes.length===1?shortOwner('blue'):`B${n}`,c.x+bw*(box-.5),my(11.65));
+    ctx.fillStyle='#d8e6ff';fillWorldText(blueBoxes.length===1?shortOwner('blue'):`B${n}`,c.x+bw*(box-.5),my(10.3));
+  }
+
+  for(const side of ['red','blue']){
+    for(const box of sideBoxes(side)){
+      const selected=side===active&&box===activeBox;
+      const pos=selected?launcherFor(side):(isBotSide(side)?boxCenter(box):launcherPointForBox(box));
+      drawPlayerIcon(side,pos,!selected||!humanTurn(),box);
+    }
   }
 
   if(jack){
@@ -4961,7 +4968,7 @@ function drawLauncher(side,dim=false){
   ctx.strokeStyle='rgba(255,255,255,.65)';
   ctx.lineWidth=1.5;
   ctx.setLineDash([4,4]);
-  ctx.beginPath();ctx.arc(pos.x,pos.y,ballR()+6,0,Math.PI*2);ctx.stroke();
+  if(!realisticMode){ctx.beginPath();ctx.arc(pos.x,pos.y,ballR()+6,0,Math.PI*2);ctx.stroke();}
   ctx.setLineDash([]);
 
   ctx.fillStyle=side==='red'?'rgba(239,77,91,.18)':'rgba(79,137,255,.18)';
@@ -4970,6 +4977,7 @@ function drawLauncher(side,dim=false){
   ctx.restore();
 }
 function drawAim(side){
+  if(realisticMode)return;
   const pos=launcherFor(side),a=aimAngle*Math.PI/180,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
   ctx.save();ctx.setLineDash([6,6]);ctx.strokeStyle='rgba(255,255,255,.84)';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(pos.x,pos.y);ctx.lineTo(pos.x+nx*len,pos.y+ny*len);ctx.stroke();ctx.setLineDash([]);
@@ -4977,6 +4985,33 @@ function drawAim(side){
   ctx.moveTo(ex,ey);ctx.lineTo(ex-nx*12-ny*6,ey-ny*12+nx*6);ctx.lineTo(ex-nx*12+ny*6,ey-ny*12-nx*6);ctx.closePath();ctx.fill();ctx.restore();
 }
 
+// A compact top-down athlete, kept entirely inside the current throwing box.
+// Appearance is local presentation; it never changes launch physics.
+function drawPlayerIcon(side,pos,dim,box){
+  const c=court(),bw=c.w/6;
+  const radius=bw*.43,left=c.x+bw*(box-1),top=my(10),bottom=my(12.5);
+  const x=Math.max(left+radius,Math.min(left+bw-radius,pos.x));
+  const y=Math.max(top+radius,Math.min(bottom-radius,pos.y+bw*.48));
+  ctx.save();ctx.globalAlpha=dim?.70:1;ctx.translate(x,y);ctx.rotate(dim?0:aimAngle*Math.PI/180);ctx.scale(bw*.48,bw*.48);
+  ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=.08;
+  ctx.fillStyle='#263342';ctx.strokeStyle='#dae3e9';
+  // Wheels, seat and backrest.
+  ctx.fillRect(-.62,-.28,.16,.78);ctx.strokeRect(-.62,-.28,.16,.78);
+  ctx.fillRect(.46,-.28,.16,.78);ctx.strokeRect(.46,-.28,.16,.78);
+  ctx.fillStyle=side==='red'?'#ec5265':'#568ff4';ctx.fillRect(-.38,-.28,.76,.68);
+  ctx.strokeStyle='#172333';ctx.beginPath();ctx.moveTo(-.39,.46);ctx.lineTo(.39,.46);ctx.stroke();
+  // Shoulders and hands identify the forward direction without an aim line.
+  ctx.strokeStyle='#efc7a1';ctx.lineWidth=.13;
+  ctx.beginPath();ctx.moveTo(-.27,-.17);ctx.lineTo(-.37,-.52);ctx.moveTo(.27,-.17);ctx.lineTo(.37,-.52);ctx.stroke();
+  if(playerAppearance==='ramp'){
+    ctx.fillStyle='#c7d1d8';ctx.strokeStyle='#465667';ctx.lineWidth=.04;
+    ctx.beginPath();ctx.moveTo(-.19,.18);ctx.lineTo(-.13,-.80);ctx.lineTo(.13,-.80);ctx.lineTo(.19,.18);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.strokeStyle='#738594';ctx.beginPath();ctx.moveTo(0,.12);ctx.lineTo(0,-.75);ctx.stroke();
+  }
+  ctx.fillStyle='#efc7a1';ctx.strokeStyle='#493b34';ctx.lineWidth=.035;
+  ctx.beginPath();ctx.arc(0,-.24,.22,0,Math.PI*2);ctx.fill();ctx.stroke();
+  ctx.restore();
+}
 function syncAimFromSliders(){
   if(!humanTurn())return;
   aimAngle=sliderValueToAngle(Number(angleSlider.value)||0);
@@ -5184,9 +5219,10 @@ try{
   if(['joystick','buttons','keyboard','sliders'].includes(saved.controlMode))controlMode=saved.controlMode;
   if(['vertical','horizontal'].includes(saved.fieldOrientation))fieldOrientation=saved.fieldOrientation;
   if(BOT_LEVELS[saved.botDifficulty])botDifficulty=saved.botDifficulty;
+  if(['wheelchair','ramp'].includes(saved.playerAppearance))playerAppearance=saved.playerAppearance;
 }catch{}
 function saveSettings(){
-  try{localStorage.setItem('boccia-settings',JSON.stringify({controlMode,fieldOrientation,botDifficulty}));}catch{}
+  try{localStorage.setItem('boccia-settings',JSON.stringify({controlMode,fieldOrientation,botDifficulty,playerAppearance}));}catch{}
 }
 function canAdjustAim(){
   return humanTurn()&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!modal.classList.contains('show')&&!document.hidden;
@@ -5279,7 +5315,12 @@ settingsButton.addEventListener('click',()=>{
   document.getElementById('orientationLock').hidden=!locked;
   document.querySelectorAll('[data-control-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.controlMode===controlMode)));
   settingsDialog.showModal();renderAimControls();
+  document.querySelectorAll('[data-player-appearance]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.playerAppearance===playerAppearance)));
 });
+document.querySelectorAll('[data-player-appearance]').forEach(button=>button.addEventListener('click',()=>{
+  playerAppearance=button.dataset.playerAppearance;saveSettings();
+  document.querySelectorAll('[data-player-appearance]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+}));
 document.getElementById('settingsCloseBtn').addEventListener('click',()=>settingsDialog.close());
 settingsDialog.addEventListener('close',()=>{resetControls();saveSettings();renderAimControls();resize();relayoutSoon();settingsButton.focus();});
 document.querySelectorAll('[data-control-mode]').forEach(button=>button.addEventListener('click',()=>{

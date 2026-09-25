@@ -11,9 +11,10 @@ try{
   if(['joystick','buttons','keyboard','sliders'].includes(saved.controlMode))controlMode=saved.controlMode;
   if(['vertical','horizontal'].includes(saved.fieldOrientation))fieldOrientation=saved.fieldOrientation;
   if(BOT_LEVELS[saved.botDifficulty])botDifficulty=saved.botDifficulty;
+  if(['wheelchair','ramp'].includes(saved.playerAppearance))playerAppearance=saved.playerAppearance;
 }catch{}
 function saveSettings(){
-  try{localStorage.setItem('boccia-settings',JSON.stringify({controlMode,fieldOrientation,botDifficulty}));}catch{}
+  try{localStorage.setItem('boccia-settings',JSON.stringify({controlMode,fieldOrientation,botDifficulty,playerAppearance}));}catch{}
 }
 function canAdjustAim(){
   return humanTurn()&&!settingsDialog.open&&!setupOverlay.classList.contains('show')&&!modal.classList.contains('show')&&!document.hidden;
@@ -106,7 +107,12 @@ settingsButton.addEventListener('click',()=>{
   document.getElementById('orientationLock').hidden=!locked;
   document.querySelectorAll('[data-control-mode]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.controlMode===controlMode)));
   settingsDialog.showModal();renderAimControls();
+  document.querySelectorAll('[data-player-appearance]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.playerAppearance===playerAppearance)));
 });
+document.querySelectorAll('[data-player-appearance]').forEach(button=>button.addEventListener('click',()=>{
+  playerAppearance=button.dataset.playerAppearance;saveSettings();
+  document.querySelectorAll('[data-player-appearance]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+}));
 document.getElementById('settingsCloseBtn').addEventListener('click',()=>settingsDialog.close());
 settingsDialog.addEventListener('close',()=>{resetControls();saveSettings();renderAimControls();resize();relayoutSoon();settingsButton.focus();});
 document.querySelectorAll('[data-control-mode]').forEach(button=>button.addEventListener('click',()=>{

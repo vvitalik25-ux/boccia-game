@@ -128,6 +128,7 @@ let setupTimers=[];
 let launcherPositions={1:{u:.5,v:.54},2:{u:.5,v:.54},3:{u:.5,v:.54},4:{u:.5,v:.54},5:{u:.5,v:.54},6:{u:.5,v:.54}};
 let preStartPause=false;
 let realisticMode=false;
+let playerAppearance='wheelchair';
 let botDifficulty='expert';
 const BOT_LEVELS={
   easy:{
@@ -203,4 +204,3 @@ let allocationSelectedBox=null;
 let allocationWorking={};
 let ballAllocation={red:{3:[]},blue:{4:[]}};
 const minSpeed=.045;
-

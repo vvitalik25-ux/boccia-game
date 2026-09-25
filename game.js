@@ -3156,7 +3156,7 @@ function launchHuman(){
   }
 
   const hardnessId=kind==='colour'?ensureSelectedBall(side):(jackHardness[side]||'soft');
-  const pos=playerPreviewBallPosition(side),a=aimAngle*Math.PI/180,speed=speedFromPower(kind==='colour'?hardnessId:'medium');
+  const pos=playerPreviewBallPosition(side),a=pos.angle,speed=speedFromPower(kind==='colour'?hardnessId:'medium');
   const launch=applyRealismToLaunch(Math.sin(a)*speed,-Math.cos(a)*speed,kind==='jack'?'jack':side,hardnessId);
   const b=spawnBall(kind==='jack'?'jack':side,side,pos.x,pos.y,launch.vx,launch.vy,hardnessId);
 
@@ -4960,7 +4960,7 @@ function drawBall(b){
 }
 function drawAim(side){
   if(realisticMode)return;
-  const pos=playerPreviewBallPosition(side,false),a=aimAngle*Math.PI/180,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
+  const pos=playerPreviewBallPosition(side,false),a=pos.angle,nx=Math.sin(a),ny=-Math.cos(a),len=46+aimPower*90;
   ctx.save();ctx.setLineDash([6,6]);ctx.strokeStyle='rgba(255,255,255,.84)';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(pos.x,pos.y);ctx.lineTo(pos.x+nx*len,pos.y+ny*len);ctx.stroke();ctx.setLineDash([]);
   const ex=pos.x+nx*len,ey=pos.y+ny*len;ctx.fillStyle='rgba(255,255,255,.92)';ctx.beginPath();
@@ -4994,25 +4994,34 @@ function drawPlayerIcon(side,pos,dim,box){
   ctx.restore();
 }
 
-function playerIconPose(pos,dim,box){
-  const c=court(),bw=c.w/6,left=c.x+bw*(box-1),angle=dim?0:aimAngle*Math.PI/180;
-  // Side bounds constrain the chair only; the front line also constrains the ramp.
+function playerIconPose(pos,dim,box,requestedAngle=aimAngle*Math.PI/180){
+  const c=court(),bw=c.w/6,left=c.x+bw*(box-1),angle=dim?0:requestedAngle;
+  // During the throw, the chair can overlap an adjacent unoccupied box.
+  // The ramp stays in its assigned box, including behind the front line.
   const co=Math.cos(angle),si=Math.sin(angle);
   const corners=[[-.66,-.59],[.66,-.59],[-.66,.64],[.66,.64],[-.46,-1.04],[.46,-1.04]];
   const xs=corners.map(([x,y])=>x*co-y*si),ys=corners.map(([x,y])=>x*si+y*co);
   const scale=bw*.48;
   const minX=Math.min(...xs)*scale,maxX=Math.max(...xs)*scale;
-  const rampYs=playerAppearance==='ramp'
-    ?[[-.255,-.755],[.255,-.755],[-.235,-1.555],[.235,-1.555]].map(([x,y])=>x*si+y*co):[];
+  const rampCorners=playerAppearance==='ramp'?[[-.255,-.755],[.255,-.755],[-.235,-1.555],[.235,-1.555]]:[];
+  const rampXs=rampCorners.map(([x,y])=>(x*co-y*si)*scale);
+  const rampYs=rampCorners.map(([x,y])=>x*si+y*co);
   const minY=Math.min(...ys,...rampYs)*scale,maxY=Math.max(...ys)*scale;
-  return{x:Math.max(left-minX,Math.min(left+bw-maxX,pos.x)),
+  const occupied=[...sideBoxes('red'),...sideBoxes('blue')];
+  const leftExtra=!dim&&box>1&&!occupied.includes(box-1)?bw:0;
+  const rightExtra=!dim&&box<6&&!occupied.includes(box+1)?bw:0;
+  let lowerX=left-leftExtra-minX,upperX=left+bw+rightExtra-maxX;
+  if(rampXs.length){lowerX=Math.max(lowerX,left-Math.min(...rampXs));upperX=Math.min(upperX,left+bw-Math.max(...rampXs));}
+  // Stop turning when no placement can fit both the chair and ramp legally.
+  if(lowerX>upperX&&Math.abs(angle)>.001)return playerIconPose(pos,dim,box,angle*.97);
+  return{x:Math.max(lowerX,Math.min(upperX,pos.x)),
     y:Math.max(my(10)-minY,Math.min(my(12.5)-maxY,pos.y+bw*.35)),scale,angle};
 }
 function playerPreviewBallPosition(side,dim=false){
   const box=(phase==='jackRed'||phase==='jackBlue')?currentJackBox:activePlayerBox[side];
   const pose=playerIconPose(launcherFor(side),dim,box);
   const reach=pose.scale*(playerAppearance==='ramp'?1.52:.85);
-  return{x:pose.x+Math.sin(pose.angle)*reach,y:pose.y-Math.cos(pose.angle)*reach};
+  return{x:pose.x+Math.sin(pose.angle)*reach,y:pose.y-Math.cos(pose.angle)*reach,angle:pose.angle};
 }
 function syncAimFromSliders(){
   if(!humanTurn())return;

@@ -1647,3 +1647,8 @@ html.mobile-ui .gameActions .puzzleExit{min-width:0;font-size:9px;line-height:1.
 #newsDialog h2{margin:0 0 12px;font-size:23px}#newsDialog p{font-size:15px;line-height:1.5;margin:0 0 20px}.newsActions{display:flex;gap:10px;flex-wrap:wrap}.newsActions button{min-height:44px;padding:10px 16px;font-size:14px;border-radius:12px;background:#e9edf4;color:#14243c}#newsSettingsBtn{background:#2162c5;color:white}
 
 .betaBadge{display:inline-block;vertical-align:middle;font-size:12px;line-height:1.2;letter-spacing:.06em;padding:5px 8px;border-radius:8px;background:#2162c5;color:#fff}
+
+.feedbackNotice{margin:12px 0 16px;padding:12px 14px;border:1px solid rgba(126,177,255,.4);border-radius:14px;background:rgba(67,123,209,.12);color:#183454;text-align:center;line-height:1.5;font-size:13px}
+.feedbackNotice strong,.feedbackNotice span{display:block}
+.feedbackNotice .feedbackEmail{display:inline-block;padding:6px 0;color:#175bb5;font-weight:700;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+

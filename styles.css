@@ -1652,3 +1652,39 @@ html.mobile-ui .gameActions .puzzleExit{min-width:0;font-size:9px;line-height:1.
 .feedbackNotice strong,.feedbackNotice span{display:block}
 .feedbackNotice .feedbackEmail{display:inline-block;padding:6px 0;color:#175bb5;font-weight:700;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
 
+/* FIX: пары и тройки — управление не обрезается */
+html.mobile-ui .aimPanel.multiPlayerFormat:has(#legacySliders:not([hidden])){
+  height:184px!important;
+  min-height:184px!important;
+  max-height:184px!important;
+  overflow:hidden!important;
+}
+
+/* Компактный выбор игрока сверху */
+html.mobile-ui .aimPanel.multiPlayerFormat:has(#legacySliders:not([hidden])) .playerChoiceWrap{
+  height:56px!important;
+  min-height:56px!important;
+  margin-bottom:4px!important;
+  overflow:hidden!important;
+}
+
+/* Когда выбор игрока временно скрыт — место всё равно сохраняем,
+   чтобы поле не прыгало после каждого броска */
+html.mobile-ui .aimPanel.multiPlayerFormat:has(#legacySliders:not([hidden])) .playerChoiceWrap.hidden{
+  display:block!important;
+  height:56px!important;
+  min-height:56px!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+
+html.mobile-ui .aimPanel.multiPlayerFormat:has(#legacySliders:not([hidden])) .playerChoices{
+  margin-bottom:2px!important;
+  gap:4px!important;
+}
+
+html.mobile-ui .aimPanel.multiPlayerFormat:has(#legacySliders:not([hidden])) .playerChoices button{
+  min-height:30px!important;
+  height:30px!important;
+  font-size:9px!important;
+}

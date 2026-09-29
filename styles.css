@@ -1719,3 +1719,16 @@ html.mobile-ui #app #aimPanel.multiPlayerFormat .playerChoices button{
   padding:0 3px!important;
   font-size:9px!important;
 }
+
+/* FIX ПАРЫ / ТРОЙКИ — iPad landscape / desktop layout */
+
+html.desktop-ui #app:has(#aimPanel.multiPlayerFormat){
+  grid-template-rows:57px minmax(0,1fr) 164px!important;
+}
+
+html.desktop-ui #app #aimPanel.multiPlayerFormat{
+  height:164px!important;
+  min-height:164px!important;
+  max-height:164px!important;
+  overflow:hidden!important;
+}

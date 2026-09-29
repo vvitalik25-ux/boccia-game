@@ -1720,15 +1720,37 @@ html.mobile-ui #app #aimPanel.multiPlayerFormat .playerChoices button{
   font-size:9px!important;
 }
 
-/* FIX ПАРЫ / ТРОЙКИ — iPad landscape / desktop layout */
+/* =========================================================
+   ПАРЫ / ТРОЙКИ — iPad / desktop
+   ========================================================= */
 
-html.desktop-ui #app:has(#aimPanel.multiPlayerFormat){
+/* Когда выбор игрока реально нужен */
+html.desktop-ui #app:has(#aimPanel.multiPlayerFormat .playerChoiceWrap:not(.hidden)){
   grid-template-rows:57px minmax(0,1fr) 164px!important;
 }
 
-html.desktop-ui #app #aimPanel.multiPlayerFormat{
+html.desktop-ui #app #aimPanel.multiPlayerFormat:has(.playerChoiceWrap:not(.hidden)){
   height:164px!important;
   min-height:164px!important;
   max-height:164px!important;
-  overflow:hidden!important;
+}
+
+/* Джек / момент, когда выбор игрока скрыт */
+html.desktop-ui #app:has(#aimPanel.multiPlayerFormat .playerChoiceWrap.hidden){
+  grid-template-rows:57px minmax(0,1fr) 86px!important;
+}
+
+html.desktop-ui #app #aimPanel.multiPlayerFormat:has(.playerChoiceWrap.hidden){
+  height:86px!important;
+  min-height:86px!important;
+  max-height:86px!important;
+}
+
+/* Главное: скрытый выбор игрока вообще не занимает место */
+html.desktop-ui #app #aimPanel.multiPlayerFormat .playerChoiceWrap.hidden{
+  display:none!important;
+  height:0!important;
+  min-height:0!important;
+  margin:0!important;
+  padding:0!important;
 }

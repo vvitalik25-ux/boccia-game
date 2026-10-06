@@ -33,6 +33,13 @@
   $('#cancel').onclick=()=>{dialog.close();input.value='';};dialog.addEventListener('close',()=>{input.value='';});
   function frame(time){frames++;if(time-frameStart>=1000){fps=Math.round(frames*1000/(time-frameStart));frames=0;frameStart=time;}raf=requestAnimationFrame(frame);}
   function close(){const old=token;token='';generation++;clearTimeout(timer);cancelAnimationFrame(raf);if(hud.hidePopover&&hud.matches(':popover-open'))hud.hidePopover();hud.hidden=true;$('#metrics').textContent='';if(old)call('logout',{},old).catch(()=>{});}
+  // pagehide covers closing, navigation and back/forward cache. Keep the token in memory only.
+  window.addEventListener('pagehide',()=>{
+    const old=token;token='';generation++;clearTimeout(timer);cancelAnimationFrame(raf);
+    if(hud.hidePopover&&hud.matches(':popover-open'))hud.hidePopover();hud.hidden=true;
+    $('#metrics').textContent='';dialog.close();input.value='';
+    if(old)fetch(api+'logout',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+old},body:'{}',keepalive:true,credentials:'omit'}).catch(()=>{});
+  });
   $('#close').onclick=close;desktop.addEventListener('change',()=>{if(!desktop.matches){close();dialog.close();}});
   const format=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n);
   async function update(){if(!token||busy)return;busy=true;const current=generation;

@@ -12,7 +12,7 @@
   let lastBeat=0;
   function heartbeat(){if(document.hidden||Date.now()-lastBeat<29000)return;lastBeat=Date.now();call('heartbeat',{id,channel}).catch(()=>{});}
   heartbeat();setInterval(heartbeat,30000);document.addEventListener('visibilitychange',heartbeat);
-  const desktop=matchMedia('(hover: hover) and (pointer: fine)');
+  const desktop=matchMedia('(hover: hover) and (pointer: fine), (min-width: 768px)');
   const host=document.createElement('div');host.id='boccia-developer-panel';document.body.append(host);
   const root=host.attachShadow({mode:'open'});
   root.innerHTML=`<style>
@@ -20,7 +20,7 @@
     #toggle{position:fixed;right:12px;bottom:8px;z-index:2147483646;font-size:10px;padding:5px 8px;color:#9daeb5;background:#14222ae6;opacity:.7}#toggle:hover,#toggle:focus{opacity:1}
     dialog{border:1px solid #587381;border-radius:12px;background:#13242e;color:#e5f4fa;width:min(350px,90vw);padding:20px}dialog::backdrop{background:#0009}h2{font-size:16px;margin:0 0 15px}label,input{display:block;width:100%}input{margin:7px 0 12px;padding:10px;color:#fff;background:#071921;border:1px solid #587381;border-radius:6px}.actions{display:flex;gap:10px}#error{min-height:32px;color:#ffc5b9}
     #hud{position:fixed;inset:12px 12px auto auto;margin:0;width:310px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;border:1px solid #45616e;border-radius:9px;background:#07151eec;color:#dcf4fa;padding:12px;z-index:2147483647;box-shadow:0 4px 24px #0007;font:12px/1.5 ui-monospace,monospace;pointer-events:auto}#hud[hidden]{display:none}header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}header button{font-size:11px;padding:3px 7px}p{margin:5px 0}.muted{color:#9cb2bd;font-size:10px}#metrics{white-space:pre-wrap}hr{border:0;border-top:1px solid #334955;margin:9px 0}
-    @media(hover:none),(pointer:coarse){#toggle,#hud{display:none!important}}
+    @media(max-width:767px) and (hover:none),(max-width:767px) and (pointer:coarse){#toggle,#hud{display:none!important}}
   </style><button id="toggle" type="button">Режим разработчика</button>
   <dialog><form><h2>Режим разработчика</h2><label>Пароль<input type="password" autocomplete="off" maxlength="256" required></label><p id="error" role="status"></p><div class="actions"><button type="submit">Войти</button><button id="cancel" type="button">Отмена</button></div></form></dialog>
   <section id="hud" popover="manual" hidden aria-label="Статистика разработчика"><header><b>Boccia · DEV HUD</b><button id="close" type="button">Выйти ×</button></header><p id="status">Подключение…</p><div id="metrics"></div><hr><p id="local"></p><p class="muted">Посетители: активные браузеры за 90 с, приблизительно. Квота: запросы всего аккаунта за сутки UTC; аналитика Cloudflare может запаздывать. Обновление: 10 с / квота 60 с.</p></section>`;

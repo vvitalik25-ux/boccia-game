@@ -44,6 +44,15 @@
 </script>
 
 <link rel="stylesheet" href="styles.css?v=2026-09-29-pairs-fix-4">
+<style id="developer-launcher-layout">
+/* Reserve a separate toolbar so the developer launcher never covers game controls. */
+@media (hover: hover) and (pointer: fine), (min-width: 768px) {
+  :root { --developer-bar-height: calc(28px + env(safe-area-inset-top, 0px)); }
+  html body #app { margin-top: var(--developer-bar-height); height: calc(100dvh - var(--developer-bar-height)) !important; }
+  html body .setupOverlay { top: var(--developer-bar-height); }
+  html body .matchClock { top: calc(var(--developer-bar-height) + env(safe-area-inset-top, 0px) + 54px); }
+}
+</style>
 </head>
 <body>
 <dialog id="newsDialog" aria-labelledby="newsTitle"><h2 id="newsTitle">Появилось много нового!</h2><p>Загляните в настройки — выберите удобное управление, расположение поля и другие параметры игры.</p><div class="newsActions"><button id="newsSettingsBtn">Открыть настройки</button><button id="newsCloseBtn">Понятно</button></div></dialog>
@@ -391,6 +400,6 @@ try{
 <script src="settings.js?v=2026-09-26-isolated-server-dev"></script>
 <script src="match-clock.js?v=2026-09-26-isolated-server-dev"></script>
 <script src="bootstrap.js?v=2026-09-26-isolated-server-dev"></script>
-<script src="developer-panel.js?v=2026-10-06-tab-session"></script>
+<script src="developer-panel.js?v=2026-10-10-launcher-toolbar"></script>
 </body>
 </html>
